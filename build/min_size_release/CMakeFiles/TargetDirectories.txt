@@ -1,0 +1,7 @@
+C:/Projects/gb_emu/build/min_size_release/CMakeFiles/gb_emu.dir
+C:/Projects/gb_emu/build/min_size_release/CMakeFiles/edit_cache.dir
+C:/Projects/gb_emu/build/min_size_release/CMakeFiles/rebuild_cache.dir
+C:/Projects/gb_emu/build/min_size_release/CMakeFiles/list_install_components.dir
+C:/Projects/gb_emu/build/min_size_release/CMakeFiles/install.dir
+C:/Projects/gb_emu/build/min_size_release/CMakeFiles/install/local.dir
+C:/Projects/gb_emu/build/min_size_release/CMakeFiles/install/strip.dir

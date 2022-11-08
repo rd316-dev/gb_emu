@@ -1,0 +1,7 @@
+C:/Projects/gb_emu/build/release/CMakeFiles/gb_emu.dir
+C:/Projects/gb_emu/build/release/CMakeFiles/edit_cache.dir
+C:/Projects/gb_emu/build/release/CMakeFiles/rebuild_cache.dir
+C:/Projects/gb_emu/build/release/CMakeFiles/list_install_components.dir
+C:/Projects/gb_emu/build/release/CMakeFiles/install.dir
+C:/Projects/gb_emu/build/release/CMakeFiles/install/local.dir
+C:/Projects/gb_emu/build/release/CMakeFiles/install/strip.dir

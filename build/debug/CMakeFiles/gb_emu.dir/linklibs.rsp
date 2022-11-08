@@ -1,0 +1,1 @@
+  -L"C:/Files/Libs/SDL2-2.24.2/x86_64-w64-mingw32/lib"  -lSDL2 ../../imgui/imgui.cpp ../../imgui/imgui_demo.cpp ../../imgui/imgui_draw.cpp ../../imgui/imgui_tables.cpp ../../imgui/imgui_widgets.cpp -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32 
