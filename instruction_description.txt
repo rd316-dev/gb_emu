@@ -1,0 +1,95 @@
+======Load 16-bit=======
+00 {reg16} 0 001 - Load imm16 to reg16
+
+[$08] 00 001 000 - Load SP to addr (a16)
+[$F8] 11 111 000 - Add s8 to SP and store in HL
+[$F9] 11 111 001 - Load HL to SP
+
+11 {reg16} 0 001 - Pop from stack to reg16
+11 {reg16} 0 100 - Push from reg16 ro stack
+
+=======Load 8-bit=======
+00 {reg8}    110    - Load imm8 to reg8
+00 {reg16} 0 010    - Load A to addr (reg16)
+00 {reg16} 1 010    - Load addr (reg16) to A
+01 {reg8}  {reg8}   - Load reg8 to reg8
+
+[$E0] 11 100 000 - Load A to addr (a8)
+[$F0] 11 110 000 - Load addr (a8) to A
+[$E2] 11 100 010 - Load A to addr (C)
+[$F2] 11 110 010 - Load addr (C) to A
+[$EA] 11 101 010 - Load A to addr (a16)
+[$FA] 11 111 010 - Load addr (a16) to A
+
+====Arithmetic 16-bit===
+00 {reg16} 0 011 - increment reg16
+00 {reg16} 1 011 - decrement reg16
+00 {reg16} 1 001 - add reg16 to HL
+
+[$E8] 11 101 000 - add s8 to SP
+
+====Arithmetic 8-bit====
+Type: 000 - ADD | 010 - SUB | 100 - AND | 110 - OR
+      001 - ADC | 011 - SBC | 101 - XOR | 111 - CP
+      
+Result is stored in A:
+10 {type} {reg8} - on reg8
+11 {type} 110    - on imm8
+
+00 {reg8} 100 - increment reg8
+00 {reg8} 101 - decrement reg8
+
+=========Jumps==========
+Flag: 0 - Z | 1 - C
+
+00 1{F}{V} 000 - Jump by s8  if flag F is V
+11 0{F}{V} 010 - Jump to a16 if flag F is V
+
+[$18] 00 011 000 - Jump by s8
+[$C3] 11 000 011 - Jump to a16
+[$E9] 11 101 001 - Jump to HL
+
+=========Calls==========
+11 0{F}{V} 100 - Call a16 if flag F is V
+[$CD] 11 001 101 - Call a16
+
+========Returns=========
+11 0{F}{V} 000 - Return to stack value if flag F is V
+[$C8] 11 001 000 - Return to stack value
+[$D8] 11 011 000 - Return to pre-interrupted address
+
+========Resets==========
+11 {value} 111 - Reset to addr (value)
+
+========Control=========
+[$00] 00 000 000 - Do nothing for a cycle
+[$10] 00 010 000 - Stop execution
+[$27] 00 100 111 - DAA
+[$37] 00 110 111 - Set the carry flag
+
+[$2F] 00 101 111 - Flip the A
+[$3F] 00 111 111 - Flip the carry flag
+
+[$76] 01 110 110 - Halt execution
+
+[$F3] 11 110 011 - Disable interrupts
+[$FA] 11 111 010 - Enable interrupts
+
+[$CB] 11 001 011 - CB Prefix
+
+==========Misc==========
+Carry: 0 - store | 1 - use
+Side:  0 - left  | 1 - right
+
+00 0{C}{S} 111 - Rotate A to side S and C carry
+
+========Prefixed========
+00 0 {C}{S} {reg8} - Rotate reg8 to side S and C carry
+00 1  0 {S} {reg8} - Signed shift reg8 to side S
+00 1  1  1  {reg8} - Unsigned shift reg8 to right side
+00 1  1  0  {reg8} - Swap reg8
+
+01 {B} {reg8} - Copy complement of bit B in reg8 to Z 
+                # I don't understand this one
+10 {B} {reg8} - Reset bit B in reg8 to 0
+11 {B} {reg8} - Set bit B in reg8 to 1
