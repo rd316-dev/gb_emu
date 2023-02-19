@@ -1,5 +1,6 @@
 #include "gameboyemulator.h"
 
+#define _DEBUG_
 #include <iostream>
 #include <string>
 
@@ -10,30 +11,61 @@ void unimplemented(std::string name)
 
 GbE::GbE()
 {
+    init_instruction_table();
+    init_cb_instruction_table();
 
+    // check both tables
+
+    for (int i = 0; i < 256; i++) {
+        if (!itab[i]) {
+            std::cout << "instruction " << std::hex << (unsigned int) i << " doesn't have a lambda" << std::endl;
+        }
+    }
+
+    for (int i = 0; i < 256; i++) {
+        if (!cbtab[i]) {
+            std::cout << "cb instruction " << std::hex << (unsigned int) i << " doesn't have a lambda" << std::endl;
+        }
+    }
+
+    vram = std::make_shared<uint8_t*>(new uint8_t[0x2000]);
+    wram = std::make_shared<uint8_t*>(new uint8_t[0x2000]);
+    hram = std::make_shared<uint8_t*>(new uint8_t[0x7F]);
+    oam  = std::make_shared<uint8_t*>(new uint8_t[0xA0]);
 }
 
-void GbE::load_boot_rom(size_t size, std::shared_ptr<uint8_t> boot_rom)
+uint16_t GbE::get_PC()
+{
+    return PC;
+}
+
+void GbE::load_boot_rom(const size_t &size, const std::shared_ptr<uint8_t*> boot_rom)
 {
     if (size < 0xFF) {
-        std::cerr << "error occurred while loading boot rom: boot rom size is lower than 256 bytes";
+        std::cerr << "Error: Boot ROM size is lower than 256 bytes. Current Size: " << size << std::endl;
         return;
     }
+
+    this->boot_rom = boot_rom;
+    this->boot_rom_mapped = true;
+    this->PC = 0;
+
+    std::cout << "Boot ROM loaded. Size: " << size << std::endl;
 }
 
-void GbE::load_rom(size_t size, std::shared_ptr<uint8_t> rom)
+void GbE::load_rom(const size_t &size, const std::shared_ptr<uint8_t*> rom)
 {
     // minimal size for a rom with a valid header is 335 bytes
     // 0x14F is the last byte of header
     if (size < 0x14F) {
-        std::cerr << "error occurred while loading rom: rom size is lower than 335 bytes" << std::endl;
+        std::cerr << "Error: ROM size is lower than 335 bytes. Current Size: " << size << std::endl;
         return;
     }
 
     this->rom_size = size;
     this->rom = rom;
 
-    uint8_t* p = rom.get();
+    uint8_t *p = *rom;
 
     // copy header to structure for easier read
     CartidgeHeader header;
@@ -50,18 +82,27 @@ void GbE::load_rom(size_t size, std::shared_ptr<uint8_t> rom)
     memcpy(&(header.rom_version),       p + 0x14C, 1);
     memcpy(&(header.header_checksum),   p + 0x14D, 1);
     memcpy(&(header.global_checksum),   p + 0x14E, 2);
+
+    std::cout << "ROM loaded. Size: " << size << std::endl;
 }
 
 void GbE::execute()
 {
     used_cycles = 0;
 
+    std::cout << std::endl << "PC: " << std::hex << (unsigned int) PC << std::dec << std::endl;
+
     uint8_t inst = fetch();
+
+    std::cout <<"INSTR " << std::hex << (unsigned int) inst << std::dec << std::endl;
+
     itab[inst]();
 
     machine_cycle += used_cycles;
 
     int used = used_cycles;
+
+    //std::cout << "TOOK " << used << " CYCLES" << std::endl;
 
     if (dma_started)
         dma_cycle(used);
@@ -129,7 +170,10 @@ void GbE::init_instruction_table()
     itab[0x08] = [this] { load_a16_SP(); };
     itab[0x08] = [this] { load_a16_SP(); };
     itab[0xF8] = [this] { load_HL_SP_s8(); };
+    itab[0xF9] = [this] { load_SP_HL(); };
     itab[0xE0] = [this] { load_a8_A(); };
+    itab[0xF0] = [this] { load_A_a8(); };
+    itab[0xE2] = [this] { load_A_aC(); };
     itab[0xF2] = [this] { load_aC_A(); };
     itab[0xEA] = [this] { load_a16_A(); };
     itab[0xFA] = [this] { load_A_a16(); };
@@ -140,8 +184,9 @@ void GbE::init_instruction_table()
     itab[0xC3] = [this] { jp_a16(); };
     itab[0xE9] = [this] { jp_HL(); };
     itab[0xCD] = [this] { call_a16(); };
-    itab[0xC8] = [this] { ret(); };
-    itab[0xD8] = [this] { reti(); };
+
+    itab[0xC9] = [this] { ret(); };
+    itab[0xD9] = [this] { reti(); };
 
     itab[0x00] = [this] { nop(); };
     itab[0x10] = [this] { stop(); };
@@ -151,92 +196,115 @@ void GbE::init_instruction_table()
     itab[0x3F] = [this] { ccf(); };
     itab[0x76] = [this] { halt(); };
     itab[0xF3] = [this] { di(); };
-    itab[0xFA] = [this] { ei(); };
+    itab[0xFB] = [this] { ei(); };
     itab[0xCB] = [this] { cb(); };
 
+    /*
+        instruction e2 doesn't have a lambda
+        instruction f0 doesn't have a lambda
+        instruction f9 doesn't have a lambda
+        instruction fb doesn't have a lambda
+     */
     enum AType {ADD, ADC, SUB, SBC, AND, XOR, OR, CP};
 
     for (int i = 0; i < 256; i++) {
-        uint8_t inst = i;
+        /*
+         *    INSTRUCTION LAYOUT:
+         *
+         *      2       3         3
+         *   |  X  |    Y    |    Z   |
+         *         |  P  | Q |
+         *            2    1
+         */
 
-        uint8_t x = inst >> 6;
-        uint8_t y = (inst >> 3) & 0x7;
-        uint8_t z = inst & 0x7;
+        uint8_t instructionCode = i;
+
+        uint8_t x = instructionCode >> 6;
+        uint8_t y = (instructionCode >> 3) & 0x7;
+        uint8_t z = instructionCode & 0x7;
 
         uint8_t p = y >> 1;
         uint8_t q = y & 1;
 
-        std::function<void()> instruction;
+        std::function<void()> inst;
 
         switch(x) {
         case 0x0:
             switch (z) {
             case 0x0:
                 if (p == 0x2)
-                    instruction = [this, q] { jr_F_s8(CF::Z, q); };
+                    inst = [this, q] { jr_F_s8(CF::Z, q); };
                 else if (p == 0x3)
-                    instruction = [this, q] { jr_F_s8(CF::C, q); };
-
+                    inst = [this, q] { jr_F_s8(CF::C, q); };
                 break;
             case 0x1:
                 if (q)
-                    instruction = [this, p] { add_HL_reg16((Reg16_SP) p); };
+                    inst = [this, p] { add_HL_reg16((Reg16_SP) p); };
                 else
-                    instruction = [this, p] { load_reg16_d16((Reg16_SP) p); };
+                    inst = [this, p] { load_reg16_d16((Reg16_SP) p); };
                 break;
             case 0x2:
                 if (q)
-                    instruction = [this, p] { load_A_aReg16((Reg16_Addr) p); };
+                    inst = [this, p] { load_A_aReg16((Reg16_Addr) p); };
                 else
-                    instruction = [this, p] { load_aReg16_A((Reg16_Addr) p); };
+                    inst = [this, p] { load_aReg16_A((Reg16_Addr) p); };
                 break;
             case 0x3:
                 if (q)
-                    instruction = [this, p] { dec_reg16((Reg16_SP) p); };
+                    inst = [this, p] { dec_reg16((Reg16_SP) p); };
                 else
-                    instruction = [this, p] { inc_reg16((Reg16_SP) p); };
+                    inst = [this, p] { inc_reg16((Reg16_SP) p); };
                 break;
             case 0x4:
-                instruction = [this, y] { inc_reg8((Reg8) y); };
+                inst = [this, y] { inc_reg8((Reg8) y); };
                 break;
             case 0x5:
-                instruction = [this, y] { inc_reg8((Reg8) y); };
+                inst = [this, y] { inc_reg8((Reg8) y); };
                 break;
             case 0x6:
-                instruction = [this, y] { load_reg8_d8((Reg8) y); };
+                inst = [this, y] { load_reg8_d8((Reg8) y); };
                 break;
+            case 0x7:
+                if (p < 2) {
+                    if (q)
+                        inst = [this, p] { rra(p & 1); };
+                    else
+                        inst = [this, p] { rla(p & 1); };
+                } else {
+
+                }
             }
 
             break;
         case 0x1:
-            instruction = [this, y, z] { load_reg8_reg8((Reg8) y, (Reg8) z); };
+            inst = [this, y, z] { load_reg8_reg8((Reg8) y, (Reg8) z); };
 
             break;
         case 0x2:
             switch (y) {
             case ADD:
-                instruction = [this, z] { add_reg8((Reg8) z); };
+                inst = [this, z] { add_reg8((Reg8) z); };
                 break;
             case ADC:
-                instruction = [this, z] { adc_reg8((Reg8) z); };
+                inst = [this, z] { adc_reg8((Reg8) z); };
                 break;
             case SUB:
-                instruction = [this, z] { sub_reg8((Reg8) z); };
+                inst = [this, z] { sub_reg8((Reg8) z); };
                 break;
             case SBC:
-                instruction = [this, z] { sbc_reg8((Reg8) z); };
+                inst = [this, z] { sbc_reg8((Reg8) z); };
                 break;
             case AND:
-                instruction = [this, z] { and_reg8((Reg8) z); };
+                inst = [this, z] { and_reg8((Reg8) z); };
                 break;
             case XOR:
-                instruction = [this, z] { xor_reg8((Reg8) z); };
+                inst = [this, z] { xor_reg8((Reg8) z); };
                 break;
             case OR:
-                instruction = [this, z] { or_reg8((Reg8) z); };
+                inst = [this, z] { or_reg8((Reg8) z); };
                 break;
             case CP:
-                instruction = [this, z] { cp_reg8((Reg8) z); };
+                inst = [this, z] { cp_reg8((Reg8) z); };
                 break;
             }
 
@@ -245,67 +313,69 @@ void GbE::init_instruction_table()
             switch(z) {
             case 0x0:
                 if (p == 0x0)
-                    instruction = [this, q] { ret_F(CF::Z, q); };
+                    inst = [this, q] { ret_F(CF::Z, q); };
                 else if (p == 0x1)
-                    instruction = [this, q] { ret_F(CF::C, q); };
+                    inst = [this, q] { ret_F(CF::C, q); };
                 break;
             case 0x1:
                 if (q == 0x0)
-                    instruction = [this, p] { pop((Reg16) p); };
+                    inst = [this, p] { pop((Reg16) p); };
                 break;
             case 0x2:
                 if (p == 0x0)
-                    instruction = [this, q] { jp_F_a16(CF::Z, q); };
+                    inst = [this, q] { jp_F_a16(CF::Z, q); };
                 else if (p == 0x1)
-                    instruction = [this, q] { jp_F_a16(CF::C, q); };
+                    inst = [this, q] { jp_F_a16(CF::C, q); };
                 break;
             case 0x4:
-                if (q == 0x0)
-                    instruction = [this, p] { push((Reg16) p); };
+                if (p == 0x0)
+                    inst = [this, q] { call_F_a16(CF::Z, q); };
+                else if (p == 0x1)
+                    inst = [this, q] { call_F_a16(CF::C, q); };
                 break;
             case 0x5:
-                if (p == 0x0)
-                    instruction = [this, q] { call_F_a16(CF::Z, q); };
-                else if (p == 0x1)
-                    instruction = [this, q] { call_F_a16(CF::C, q); };
+                if (q == 0x0)
+                    inst = [this, p] { push((Reg16) p); };
                 break;
             case 0x6:
                 switch (y) {
                 case ADD:
-                    instruction = [this] { add_d8(); };
+                    inst = [this] { add_d8(); };
                     break;
                 case ADC:
-                    instruction = [this] { adc_d8(); };
+                    inst = [this] { adc_d8(); };
                     break;
                 case SUB:
-                    instruction = [this] { sub_d8(); };
+                    inst = [this] { sub_d8(); };
                     break;
                 case SBC:
-                    instruction = [this] { sbc_d8(); };
+                    inst = [this] { sbc_d8(); };
                     break;
                 case AND:
-                    instruction = [this] { and_d8(); };
+                    inst = [this] { and_d8(); };
                     break;
                 case XOR:
-                    instruction = [this] { xor_d8(); };
+                    inst = [this] { xor_d8(); };
                     break;
                 case OR:
-                    instruction = [this] { or_d8(); };
+                    inst = [this] { or_d8(); };
                     break;
                 case CP:
-                    instruction = [this] { cp_d8(); };
+                    inst = [this] { cp_d8(); };
                     break;
                 }
 
                 break;
             case 0x7:
-                instruction = [this, y] { rst_val(y); };
+                inst = [this, y] { rst_val(y); };
                 break;
             }
             break;
         }
 
-        itab[inst] = instruction;
+        if (inst && !itab[instructionCode]) {
+            itab[instructionCode] = inst;
+        }
     }
 
     uint8_t excluded[] = {0xD3, 0xE3, 0xE4, 0xF4, 0xDB, 0xEB, 0xEC, 0xFC, 0xDD, 0xED, 0xFD};
@@ -373,15 +443,17 @@ uint8_t GbE::read_memory(uint16_t addr)
 {
     used_cycles++;
 
-    if (addr <= 0x00FF && boot_rom_mapped) return boot_rom.get()[addr];
-    else if (addr <= 0x3FFF) return rom.get()[mapper.convert_rom0_addr(addr)];
-    else if (addr <= 0x7FFF) return rom.get()[mapper.convert_romN_addr(addr)];
-    else if (addr <= 0x9FFF) return vram.get()[addr - 0x8000];
-    else if (addr <= 0xBFFF) return external_ram.get()[mapper.convert_ram_addr(addr)];
-    else if (addr <= 0xCFFF) return wram.get()[addr - 0xC000];
-    else if (addr <= 0xDFFF) return wram.get()[addr - 0xC000];
-    else if (addr <= 0xFDFF) return wram.get()[addr - 0xC000];
-    else if (addr <= 0xFE9F) return oam.get()[addr - 0xFE00];
+    if (addr <= 0x00FF && boot_rom_mapped) return (*boot_rom)[addr];
+    else if (addr <= 0x3FFF) return (*rom)[mapper.convert_rom0_addr(addr)];
+    else if (addr <= 0x7FFF) return (*rom)[mapper.convert_romN_addr(addr)];
+    else if (addr <= 0x9FFF) return (*vram)[addr - 0x8000];
+    else if (addr <= 0xBFFF) return (*external_ram)[mapper.convert_ram_addr(addr)];
+
+    else if (addr <= 0xCFFF) return (*wram)[addr - 0xC000];
+    else if (addr <= 0xDFFF) return (*wram)[addr - 0xC000];
+    else if (addr <= 0xFDFF) return (*wram)[addr - 0xC000];
+
+    else if (addr <= 0xFE9F) return (*oam)[addr - 0xFE00];
     else if (addr <= 0xFEFF) return 0xFF; // not usable
     else if (addr <= 0xFF7F) {
         if (addr <= 0xFF00) {
@@ -410,7 +482,7 @@ uint8_t GbE::read_memory(uint16_t addr)
             unknown();
         }
     }
-    else if (addr <= 0xFFFE) return hram.get()[addr - 0xFF80];
+    else if (addr <= 0xFFFE) return (*hram)[addr - 0xFF80];
     else return interrupt_enabled;
 
     return 0xFF;
@@ -422,15 +494,15 @@ void GbE::write_memory(uint16_t addr, uint8_t val)
 
     if      (addr <= 0x3FFF) mapper.handle_rom0_write(addr, val);
     else if (addr <= 0x7FFF) mapper.handle_romN_write(addr, val);
-    else if (addr <= 0x9FFF) vram.get()[addr - 0x8000] = val;
+    else if (addr <= 0x9FFF) (*vram)[addr - 0x8000] = val;
     else if (addr <= 0xBFFF) {
         if (!mapper.handle_ram_write(addr, val))
-            external_ram.get()[mapper.convert_ram_addr(addr)] = val;
+            (*external_ram)[mapper.convert_ram_addr(addr)] = val;
     }
-    else if (addr <= 0xCFFF) wram.get()[addr - 0xC000] = val;
-    else if (addr <= 0xDFFF) wram.get()[addr - 0xC000] = val;
-    else if (addr <= 0xFDFF) wram.get()[addr - 0xC000] = val;
-    else if (addr <= 0xFE9F) oam.get()[addr - 0xFE00] = val;
+    else if (addr <= 0xCFFF) (*wram)[addr - 0xC000] = val;
+    else if (addr <= 0xDFFF) (*wram)[addr - 0xC000] = val;
+    else if (addr <= 0xFDFF) (*wram)[addr - 0xC000] = val;
+    else if (addr <= 0xFE9F) (*oam)[addr - 0xFE00] = val;
     else if (addr <= 0xFEFF) unknown();
     else if (addr <= 0xFF80) {
         if (addr <= 0xFF00) {
@@ -488,7 +560,7 @@ void GbE::write_memory(uint16_t addr, uint8_t val)
             unknown();
         }
     }
-    else if (addr <= 0xFFFF) hram.get()[addr - 0xFF80] = val;
+    else if (addr <= 0xFFFF) (*hram)[addr - 0xFF80] = val;
     else                     interrupt_enabled = val;
 }
 
@@ -541,14 +613,14 @@ void GbE::write_register8(Reg8 reg, uint8_t val)
 
 uint16_t GbE::read_register16(Reg16 reg)
 {
-    uint8_t addr = (uint8_t) reg;
+    uint8_t addr = ((uint8_t) reg) * 2;
 
     return (registers[addr] << 8) | registers[addr+1];
 }
 
 void GbE::write_register16(Reg16 reg, uint16_t val)
 {
-    uint8_t addr = (uint8_t) reg;
+    uint8_t addr = ((uint8_t) reg) * 2;
 
     registers[addr] = (uint8_t) val >> 8;
     registers[addr+1] = (uint8_t) val;
@@ -559,18 +631,19 @@ uint16_t GbE::read_register16(Reg16_SP reg)
     if (reg == Reg16_SP::SP)
         return SP;
 
-    uint8_t addr = (uint8_t) reg;
+    uint8_t addr = ((uint8_t) reg) * 2;
     return (registers[addr] << 8) | registers[addr+1];
 }
 
 void GbE::write_register16(Reg16_SP reg, uint16_t val)
 {
     if (reg == Reg16_SP::SP) {
+        std::cout << "SP write: " << std::hex << (unsigned int) val << std::dec << std::endl;
         SP = val;
         return;
     }
 
-    uint8_t addr = (uint8_t) reg;
+    uint8_t addr = ((uint8_t) reg) * 2;
 
     registers[addr] = (uint8_t) val >> 8;
     registers[addr+1] = (uint8_t) val;
@@ -578,7 +651,9 @@ void GbE::write_register16(Reg16_SP reg, uint16_t val)
 
 uint8_t GbE::fetch()
 {
-    return read_memory(PC++);
+    auto mem = read_memory(PC++);
+
+    return mem;
 }
 
 int8_t GbE::fetch_signed()
@@ -713,6 +788,7 @@ void GbE::ei()
 void GbE::cb()
 {
     uint8_t inst = fetch();
+    std::cout << "cb fetched: " << std::hex << (unsigned int) inst << std::dec << std::endl;
     cbtab[inst]();
 }
 //===========Control==============
@@ -856,7 +932,7 @@ void GbE::load_reg16_d16(Reg16_SP reg) {
 
 void GbE::load_HL_SP_s8() {
     int8_t s8 = fetch_signed();
-    uint16_t result = SP + s8;
+    uint16_t result = read_register16(Reg16_SP::SP) + s8;
 
     set_H(half_carry_happened16(SP, s8));
     set_C(carry_happened16(SP, s8));
@@ -865,23 +941,25 @@ void GbE::load_HL_SP_s8() {
 }
 
 void GbE::load_SP_HL() {
-    SP = read_register16(Reg16::HL);
+    write_register16(Reg16_SP::SP, read_register16(Reg16::HL));
 }
 
 void GbE::load_a16_SP()
 {
     uint16_t addr = fetch16();
-    write_memory(addr, SP);
+    write_memory(addr, read_register16(Reg16_SP::SP));
 }
 
 uint16_t GbE::pop16()
 {
-    uint16_t result = read_memory(SP);
-    SP++;
+    std::cout << "pop16 called, SP: " << std::hex << (unsigned int) SP << std::dec << std::endl;
+    uint16_t result = read_memory(read_register16(Reg16_SP::SP));
+    write_register16(Reg16_SP::SP, read_register16(Reg16_SP::SP) + 1);
 
-    result = result | ((uint16_t) read_memory(SP) << 8);
-    SP++;
+    result = result | ((uint16_t) read_register16(Reg16_SP::SP) << 8);
+    write_register16(Reg16_SP::SP, read_register16(Reg16_SP::SP) + 1);
 
+    std::cout << "result: " << std::hex << (unsigned int) result << std::dec << std::endl;
     return result;
 }
 
@@ -892,11 +970,11 @@ void GbE::pop(Reg16 reg)
 
 void GbE::push16(uint16_t val)
 {
-    SP--;
-    write_memory(SP, (uint8_t) (val >> 8));
+    write_register16(Reg16_SP::SP, read_register16(Reg16_SP::SP) - 1);
+    write_memory(read_register16(Reg16_SP::SP), (uint8_t) (val >> 8));
 
-    SP--;
-    write_memory(SP, (uint8_t) val);
+    write_register16(Reg16_SP::SP, read_register16(Reg16_SP::SP) - 1);
+    write_memory(read_register16(Reg16_SP::SP), (uint8_t) val);
 }
 
 void GbE::push(Reg16 reg)
@@ -921,9 +999,11 @@ void GbE::load_aReg16_A(Reg16_Addr reg)
     } else if (reg == Reg16_Addr::DE) {
         addr = read_register16(Reg16::DE);
     } else if (reg == Reg16_Addr::HLD) {
+        std::cout << "its decrement" << std::endl;
         addr = read_register16(Reg16::HL);
         write_register16(Reg16::HL, addr - 1);
     } else if (reg == Reg16_Addr::HLI) {
+        std::cout << "its increment" << std::endl;
         addr = read_register16(Reg16::HL);
         write_register16(Reg16::HL, addr + 1);
     }
@@ -1019,8 +1099,8 @@ void GbE::add_HL_reg16(Reg16_SP reg16)
 
 void GbE::add_SP_s8()
 {
-    uint16_t val1 = read_register16(Reg16::HL);
-    uint16_t val2 = fetch_signed();
+    uint16_t val1 = read_register16(Reg16_SP::SP);
+    int8_t val2 = fetch_signed();
     uint16_t result = val1 + val2;
 
     set_Z(0);
@@ -1028,7 +1108,7 @@ void GbE::add_SP_s8()
     set_H(half_carry_happened16(val1, val2));
     set_C(carry_happened16(val1, val2));
 
-    write_register16(Reg16::HL, result);
+    write_register16(Reg16_SP::SP, result);
 }
 //======16-bit arithmetic=========
 
@@ -1269,6 +1349,7 @@ void GbE::cp_d8()
 // relative jumps
 void GbE::jr_F_s8(CF flag, bool val)
 {
+    int8_t s = fetch_signed();
     bool flagVal;
     if (flag == CF::Z)
         flagVal = get_Z();
@@ -1276,7 +1357,7 @@ void GbE::jr_F_s8(CF flag, bool val)
         flagVal = get_C();
 
     if (flagVal == val)
-        PC += fetch_signed();
+        PC += s;
 }
 
 void GbE::jr_s8()

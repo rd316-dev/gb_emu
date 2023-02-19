@@ -10,8 +10,8 @@
 
 enum class Reg8 {B, C, D, E, H, L, _HL, A};
 enum class Reg16 {BC=0, DE=2, HL=4, AF=6};
-enum class Reg16_SP {BC=0, DE=2, HL=4, SP=6};
-enum class Reg16_Addr {BC=0, DE=2, HLI=4, HLD=6};
+enum class Reg16_SP {BC=0, DE=1, HL=2, SP=3};
+enum class Reg16_Addr {BC=0, DE=1, HLI=2, HLD=3};
 
 enum class CF {Z, C}; // zero or carry
 
@@ -47,10 +47,11 @@ class GbE
 {
 public:
     GbE();
-    ~GbE();
 
-    void load_boot_rom(size_t size, std::shared_ptr<uint8_t> boot_rom);
-    void load_rom(size_t size, std::shared_ptr<uint8_t> rom);
+    uint16_t get_PC();
+
+    void load_boot_rom(const size_t &size, const std::shared_ptr<uint8_t*> boot_rom);
+    void load_rom(const size_t &size, const std::shared_ptr<uint8_t*> rom);
     void execute();
 
     void init_instruction_table();
@@ -180,36 +181,34 @@ public:
     void rst_val(uint8_t val);
     //============Jumps===============
 protected:
-    uint8_t     read_memory(uint16_t addr);
-    void        write_memory(uint16_t addr, uint8_t val);
+    uint8_t  read_memory(uint16_t addr);
+    uint8_t  read_register8(Reg8 reg);
+    uint16_t read_register16(Reg16 reg);
+    uint16_t read_register16(Reg16_SP reg);
 
-    uint8_t     read_register8(Reg8 reg);
-    void        write_register8(Reg8 reg, uint8_t val);
+    void write_memory(uint16_t addr, uint8_t val);
+    void write_register8(Reg8 reg, uint8_t val);
+    void write_register16(Reg16 reg, uint16_t val);
+    void write_register16(Reg16_SP reg, uint16_t val);
 
-    uint16_t    read_register16(Reg16 reg);
-    void        write_register16(Reg16 reg, uint16_t val);
+    uint8_t  fetch();
+    uint16_t fetch16();
+    int8_t   fetch_signed();
+    int16_t  fetch16_signed();
 
-    uint16_t    read_register16(Reg16_SP reg);
-    void        write_register16(Reg16_SP reg, uint16_t val);
+    uint16_t pop16();
+    void     push16(uint16_t val);
 
-    uint8_t     fetch();
-    uint16_t    fetch16();
-    int8_t      fetch_signed();
-    int16_t     fetch16_signed();
+    bool half_carry_happened16(uint16_t val1, uint16_t val2);
+    bool half_carry_happened8(uint8_t val1, uint8_t val2);
 
-    uint16_t    pop16();
-    void        push16(uint16_t val);
+    bool carry_happened16(uint16_t val1, uint16_t val2);
+    bool carry_happened8(uint8_t val1, uint8_t val2);
 
-    bool    half_carry_happened16(uint16_t val1, uint16_t val2);
-    bool    half_carry_happened8(uint8_t val1, uint8_t val2);
-
-    bool    carry_happened16(uint16_t val1, uint16_t val2);
-    bool    carry_happened8(uint8_t val1, uint8_t val2);
-
-    void    set_Z(bool value);
-    void    set_N(bool value);
-    void    set_H(bool value);
-    void    set_C(bool value);
+    void set_Z(bool value);
+    void set_N(bool value);
+    void set_H(bool value);
+    void set_C(bool value);
 
     uint8_t get_Z();
     uint8_t get_N();
@@ -247,14 +246,14 @@ protected:
 
     uint8_t interrupt_enabled = 0x01;
 
-    int fetcher_y                   = 0;
-    int fetcher_x                   = 0;
+    int fetcher_y       = 0;
+    int fetcher_x       = 0;
 
-    int current_dot                 = 0;
-    int fetcher_step                = 0;
+    int current_dot     = 0;
+    int fetcher_step    = 0;
 
-    bool stopped                    = false;
-    bool halted                     = false;
+    bool stopped        = false;
+    bool halted         = false;
 
     bool ppu_enabled                = false;
     bool window_tile_map_area       = false;
@@ -262,11 +261,11 @@ protected:
     bool bg_window_tile_data_area   = false;
     bool bg_tile_map_area           = false;
 
-    bool vram_accessible            = true;
-    bool oam_accessible             = true;
-    bool boot_rom_mapped            = true;
+    bool vram_accessible    = true;
+    bool oam_accessible     = true;
+    bool boot_rom_mapped    = true;
 
-    bool dma_started                = false;
+    bool dma_started        = false;
 
     uint16_t dma_src_addr   = 0;
     uint16_t dma_dest_addr  = 0;
@@ -291,14 +290,14 @@ protected:
     uint16_t frame_buffer_2[160*144] = {};
     uint16_t* current_frame_buffer = frame_buffer_1;
 
-    std::shared_ptr<uint8_t> wram;
-    std::shared_ptr<uint8_t> vram;
-    std::shared_ptr<uint8_t> hram;
-    std::shared_ptr<uint8_t> oam;
+    std::shared_ptr<uint8_t*> wram;
+    std::shared_ptr<uint8_t*> vram;
+    std::shared_ptr<uint8_t*> hram;
+    std::shared_ptr<uint8_t*> oam;
 
-    std::shared_ptr<uint8_t> boot_rom;
-    std::shared_ptr<uint8_t> rom;
-    std::shared_ptr<uint8_t> external_ram;
+    std::shared_ptr<uint8_t*> boot_rom;
+    std::shared_ptr<uint8_t*> rom;
+    std::shared_ptr<uint8_t*> external_ram;
 };
 
 #endif // GAMEBOYEMULATOR_H
