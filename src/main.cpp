@@ -8,7 +8,6 @@
 
 #include <iostream>
 #include <fstream>
-#include <iomanip>
 
 std::shared_ptr<uint8_t*> load_file(std::string path, size_t *size)
 {
@@ -23,27 +22,6 @@ std::shared_ptr<uint8_t*> load_file(std::string path, size_t *size)
     std::copy(buffer.begin(), buffer.end(), data);
 
     return std::make_shared<uint8_t*>(data);
-}
-
-void debuggerRegisters(const GbE *emu)
-{
-    if (ImGui::BeginTable("Registers", 7)) {
-        ImGui::TableNextRow();
-        char names[] = {'A', 'B', 'C', 'D', 'E', 'H', 'L'};
-        for (char c : names) {
-            ImGui::TableNextColumn();
-            ImGui::Text("%c", c);
-        }
-        Reg8 regs[] = {Reg8::A, Reg8::B, Reg8::C, Reg8::D, Reg8::E, Reg8::H, Reg8::L};
-
-        ImGui::TableNextRow();
-        for (Reg8 r : regs) {
-            ImGui::TableNextColumn();
-            ImGui::Text("%02X", emu->read_register8(r));
-        }
-
-        ImGui::EndTable();
-    }
 }
 
 int main()
@@ -88,7 +66,6 @@ int main()
 
     //uint16_t breakpoint = 0x9f;
     bool breakpoint_reached = false;
-    bool auto_execution_enabled = false;
 
     SDL_Event e;
     bool quit = false;
@@ -111,71 +88,17 @@ int main()
         ImGui_ImplSDL2_NewFrame();
 
         ImGui::NewFrame();
-        ImGui::Begin("FPS");
-        ImGui::Text("%.1f FPS", ImGui::GetIO().Framerate);
-        ImGui::End();
+        ImGui::Begin("Hello, world!");
 
-        ImGui::Begin("Registers");
-        ImGui::Text("PC: %#04X\n ", emu.get_PC());
+        ImGui::Text("Application average %.3f ms/frame (%.1f FPS)",
+                    1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 
-        if (ImGui::BeginTable("Registers", 7)) {
-            ImGui::TableNextRow();
-            char names[] = {'A', 'B', 'C', 'D', 'E', 'H', 'L'};
-            for (char c : names) {
-                ImGui::TableNextColumn();
-                ImGui::Text("%c", c);
-            }
-            Reg8 regs[] = {Reg8::A, Reg8::B, Reg8::C, Reg8::D, Reg8::E, Reg8::H, Reg8::L};
-
-            ImGui::TableNextRow();
-            for (Reg8 r : regs) {
-                ImGui::TableNextColumn();
-                ImGui::Text("%02X", emu.read_register8(r));
-            }
-
-            ImGui::EndTable();
-        }
-
-        if (ImGui::BeginTable("Flags", 4)) {
-            ImGui::TableNextRow();
-            char names[] = {'Z', 'N', 'H', 'C'};
-            for (char c : names) {
-                ImGui::TableNextColumn();
-                ImGui::Text("%c", c);
-            }
-
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            ImGui::Text("%d", emu.get_Z() ? 1 : 0);
-            ImGui::TableNextColumn();
-            ImGui::Text("%d", emu.get_N() ? 1 : 0);
-            ImGui::TableNextColumn();
-            ImGui::Text("%d", emu.get_H() ? 1 : 0);
-            ImGui::TableNextColumn();
-            ImGui::Text("%d", emu.get_C() ? 1 : 0);
-
-            ImGui::EndTable();
-        }
-
-        if (auto_execution_enabled && !breakpoint_reached) {
+        if (!breakpoint_reached) {
             emu.execute();
-
-            if (emu.isHalted()) {
-                std::cout << "Received HALT" << std::endl;
-                breakpoint_reached = true;
-            } else if (emu.isStopped()) {
-                std::cout << "Received STOP" << std::endl;
-                breakpoint_reached = true;
-            }
-            if (emu.get_PC() >= 0x100) {
-                std::cout << "Boot ROM execution finished. ROM started" << std::endl;
-                breakpoint_reached = true;
-            }
 
             if (emu.get_PC() >= rom_size) {
                 breakpoint_reached = true;
-                std::cout << "Breakpoint at " << std::hex << std::setw(4) << std::setfill('0')
-                          << (unsigned int) emu.get_PC() << std::dec << " reached" << std::endl;
+                std::cout << "Breakpoint at " << std::hex << (unsigned int) emu.get_PC() << std::dec << " reached" << std::endl;
             }
         }
 
