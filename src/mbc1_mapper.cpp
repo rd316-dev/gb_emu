@@ -46,17 +46,17 @@ bool MBC1_Mapper::handle_ram_write(uint16_t addr, uint8_t val)
     return !use_ram_banking;
 }
 
-uint16_t MBC1_Mapper::convert_rom0_addr(uint16_t address)
+uint16_t MBC1_Mapper::convert_rom0_addr(uint16_t address) const
 {
     return address;
 }
 
-uint16_t MBC1_Mapper::convert_romN_addr(uint16_t address)
+uint16_t MBC1_Mapper::convert_romN_addr(uint16_t address) const
 {
     return (address - 0x4000) + rom_offset;
 }
 
-uint16_t MBC1_Mapper::convert_ram_addr(uint16_t address)
+uint16_t MBC1_Mapper::convert_ram_addr(uint16_t address) const
 {
     return (address - 0xA000) + ram_offset;
 }

@@ -12,9 +12,9 @@ public:
     bool handle_romN_write(uint16_t address, uint8_t value) override;
     bool handle_ram_write(uint16_t address, uint8_t value) override;
 
-    uint16_t convert_rom0_addr(uint16_t address) override;
-    uint16_t convert_romN_addr(uint16_t address) override;
-    uint16_t convert_ram_addr(uint16_t address) override;
+    uint16_t convert_rom0_addr(uint16_t address) const override;
+    uint16_t convert_romN_addr(uint16_t address) const override;
+    uint16_t convert_ram_addr(uint16_t address) const override;
 
 private:
     bool use_ram_banking = true;
