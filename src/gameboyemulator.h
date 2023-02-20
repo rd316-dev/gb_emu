@@ -9,7 +9,7 @@
 #include <functional>
 
 enum class Reg8 {B, C, D, E, H, L, _HL, A};
-enum class Reg16 {BC=0, DE=2, HL=4, AF=6};
+enum class Reg16 {BC=0, DE=1, HL=2, AF=3};
 enum class Reg16_SP {BC=0, DE=1, HL=2, SP=3};
 enum class Reg16_Addr {BC=0, DE=1, HLI=2, HLD=3};
 
@@ -54,6 +54,32 @@ public:
     void load_rom(const size_t &size, const std::shared_ptr<uint8_t*> rom);
     void execute();
 
+    bool isStopped() const;
+    bool isHalted() const;
+
+    uint8_t get_Z() const;
+    uint8_t get_N() const;
+    uint8_t get_H() const;
+    uint8_t get_C() const;
+
+    uint8_t  read_memory(uint16_t addr);
+
+    uint8_t  read_register8(Reg8 reg) const;
+    uint16_t read_register16(Reg16 reg) const;
+    uint16_t read_register16(Reg16_SP reg) const;
+
+    void write_memory(uint16_t addr, uint8_t val);
+    void write_register8(Reg8 reg, uint8_t val);
+    void write_register16(Reg16 reg, uint16_t val);
+    void write_register16(Reg16_SP reg, uint16_t val);
+
+    bool half_carry_happened16(uint16_t val1, uint16_t val2) const;
+    bool half_carry_happened8(uint8_t val1, uint8_t val2) const;
+
+    bool carry_happened16(uint16_t val1, uint16_t val2) const;
+    bool carry_happened8(uint8_t val1, uint8_t val2) const;
+
+protected:
     void init_instruction_table();
     void init_cb_instruction_table();
 
@@ -180,16 +206,6 @@ public:
     // resets
     void rst_val(uint8_t val);
     //============Jumps===============
-protected:
-    uint8_t  read_memory(uint16_t addr);
-    uint8_t  read_register8(Reg8 reg);
-    uint16_t read_register16(Reg16 reg);
-    uint16_t read_register16(Reg16_SP reg);
-
-    void write_memory(uint16_t addr, uint8_t val);
-    void write_register8(Reg8 reg, uint8_t val);
-    void write_register16(Reg16 reg, uint16_t val);
-    void write_register16(Reg16_SP reg, uint16_t val);
 
     uint8_t  fetch();
     uint16_t fetch16();
@@ -199,22 +215,12 @@ protected:
     uint16_t pop16();
     void     push16(uint16_t val);
 
-    bool half_carry_happened16(uint16_t val1, uint16_t val2);
-    bool half_carry_happened8(uint8_t val1, uint8_t val2);
-
-    bool carry_happened16(uint16_t val1, uint16_t val2);
-    bool carry_happened8(uint8_t val1, uint8_t val2);
-
     void set_Z(bool value);
     void set_N(bool value);
     void set_H(bool value);
     void set_C(bool value);
 
-    uint8_t get_Z();
-    uint8_t get_N();
-    uint8_t get_H();
-    uint8_t get_C();
-
+    //===============FIELDS===============
     uint8_t registers[8]; // B, C, D, E, H, L, F, A
 
     uint16_t SP = 0;

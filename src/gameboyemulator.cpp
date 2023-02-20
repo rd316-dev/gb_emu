@@ -3,6 +3,7 @@
 #define _DEBUG_
 #include <iostream>
 #include <string>
+#include <iomanip>
 
 void unimplemented(std::string name)
 {
@@ -32,6 +33,16 @@ GbE::GbE()
     wram = std::make_shared<uint8_t*>(new uint8_t[0x2000]);
     hram = std::make_shared<uint8_t*>(new uint8_t[0x7F]);
     oam  = std::make_shared<uint8_t*>(new uint8_t[0xA0]);
+}
+
+bool GbE::isStopped() const
+{
+    return stopped;
+}
+
+bool GbE::isHalted() const
+{
+    return halted;
 }
 
 uint16_t GbE::get_PC()
@@ -90,11 +101,13 @@ void GbE::execute()
 {
     used_cycles = 0;
 
-    std::cout << std::endl << "PC: " << std::hex << (unsigned int) PC << std::dec << std::endl;
+    std::cout << std::hex << std::setw(4) << std::setfill('0')
+              << (unsigned int) PC;
 
     uint8_t inst = fetch();
 
-    std::cout <<"INSTR " << std::hex << (unsigned int) inst << std::dec << std::endl;
+    std::cout << "\t" << std::setw(2) << std::setfill('0')
+              << (unsigned int) inst << std::dec << std::endl;
 
     itab[inst]();
 
@@ -508,6 +521,7 @@ void GbE::write_memory(uint16_t addr, uint8_t val)
         if (addr <= 0xFF00) {
             // joypad
         } else if (addr <= 0xFF02) {
+            std::cout << "Serial: " << val << " | " << std::hex << (unsigned int) val << std::dec << std::endl;
             // serial transfer
         } else if (addr <= 0xFF07) {
             // timer and divider
@@ -549,7 +563,9 @@ void GbE::write_memory(uint16_t addr, uint8_t val)
         } else if (addr <= 0xFF4F) {
             // [cgb] vram bank select
         } else if (addr <= 0xFF50) {
-            // disable boot rom
+            if (val) { // disable boot rom
+                boot_rom_mapped = false;
+            }
         } else if (addr <= 0xFF55) {
             // [cgb] vram dma
         } else if (addr <= 0xFF69) {
@@ -560,36 +576,38 @@ void GbE::write_memory(uint16_t addr, uint8_t val)
             unknown();
         }
     }
-    else if (addr <= 0xFFFF) (*hram)[addr - 0xFF80] = val;
-    else                     interrupt_enabled = val;
+    else if (addr <= 0xFFFF)
+        (*hram)[addr - 0xFF80] = val;
+    else
+        interrupt_enabled = val;
 }
 
-bool GbE::half_carry_happened16(uint16_t val1, uint16_t val2)
+bool GbE::half_carry_happened16(uint16_t val1, uint16_t val2) const
 {
     return (((val1 & 0xFFF) + (val2 & 0xFFF)) & 0x1000) == 0x1000;
 }
 
-bool GbE::half_carry_happened8(uint8_t val1, uint8_t val2)
+bool GbE::half_carry_happened8(uint8_t val1, uint8_t val2) const
 {
     return (((val1 & 0xF) + (val2 & 0xF)) & 0x10) == 0x10;
 }
 
-bool GbE::carry_happened16(uint16_t val1, uint16_t val2)
+bool GbE::carry_happened16(uint16_t val1, uint16_t val2) const
 {
     return (0xFFFF - val1) < val2;
 }
 
-bool GbE::carry_happened8(uint8_t val1, uint8_t val2)
+bool GbE::carry_happened8(uint8_t val1, uint8_t val2) const
 {
     return (0xFF - val1) < val2;
 }
 
-uint8_t GbE::read_register8(Reg8 reg)
+uint8_t GbE::read_register8(Reg8 reg) const
 {
     if (reg == Reg8::_HL) {
         // should it be the other way around?
-        uint16_t addr = registers[5];
-        addr = addr | ((uint16_t) registers[4] << 8);
+        uint16_t addr = read_register8(Reg8::L);
+        addr = addr | ((uint16_t) read_register8(Reg8::H) << 8);
 
         return read_memory(addr);
     }
@@ -600,9 +618,7 @@ uint8_t GbE::read_register8(Reg8 reg)
 void GbE::write_register8(Reg8 reg, uint8_t val)
 {
     if (reg == Reg8::_HL) {
-        uint16_t addr = registers[5];
-        addr = addr | ((uint16_t) registers[4] << 8);
-
+        uint16_t addr = read_register16(Reg16::HL);
         write_memory(addr, val);
 
         return;
@@ -622,8 +638,8 @@ void GbE::write_register16(Reg16 reg, uint16_t val)
 {
     uint8_t addr = ((uint8_t) reg) * 2;
 
-    registers[addr] = (uint8_t) val >> 8;
-    registers[addr+1] = (uint8_t) val;
+    registers[addr] = (uint8_t) (val >> 8);
+    registers[addr+1] = (uint8_t) (val & 0xFF);
 }
 
 uint16_t GbE::read_register16(Reg16_SP reg)
@@ -638,22 +654,19 @@ uint16_t GbE::read_register16(Reg16_SP reg)
 void GbE::write_register16(Reg16_SP reg, uint16_t val)
 {
     if (reg == Reg16_SP::SP) {
-        std::cout << "SP write: " << std::hex << (unsigned int) val << std::dec << std::endl;
         SP = val;
         return;
     }
 
     uint8_t addr = ((uint8_t) reg) * 2;
 
-    registers[addr] = (uint8_t) val >> 8;
-    registers[addr+1] = (uint8_t) val;
+    registers[addr] = (uint8_t) (val >> 8);
+    registers[addr+1] = (uint8_t) (val & 0xFF);
 }
 
 uint8_t GbE::fetch()
 {
-    auto mem = read_memory(PC++);
-
-    return mem;
+    return read_memory(PC++);
 }
 
 int8_t GbE::fetch_signed()
@@ -713,22 +726,22 @@ void GbE::set_C(bool val)
         registers[6] = registers[6] ^ 0x10;
 }
 
-uint8_t GbE::get_Z()
+uint8_t GbE::get_Z() const
 {
     return registers[6] >> 7;
 }
 
-uint8_t GbE::get_N()
+uint8_t GbE::get_N() const
 {
     return (registers[6] >> 6) & 1;
 }
 
-uint8_t GbE::get_H()
+uint8_t GbE::get_H() const
 {
     return (registers[6] >> 5) & 1;
 }
 
-uint8_t GbE::get_C()
+uint8_t GbE::get_C() const
 {
     return (registers[6] >> 4) & 1;
 }
@@ -788,7 +801,7 @@ void GbE::ei()
 void GbE::cb()
 {
     uint8_t inst = fetch();
-    std::cout << "cb fetched: " << std::hex << (unsigned int) inst << std::dec << std::endl;
+    std::cout << "    CB\t" << std::hex << (unsigned int) inst << std::dec << std::endl;
     cbtab[inst]();
 }
 //===========Control==============
@@ -952,14 +965,12 @@ void GbE::load_a16_SP()
 
 uint16_t GbE::pop16()
 {
-    std::cout << "pop16 called, SP: " << std::hex << (unsigned int) SP << std::dec << std::endl;
     uint16_t result = read_memory(read_register16(Reg16_SP::SP));
     write_register16(Reg16_SP::SP, read_register16(Reg16_SP::SP) + 1);
 
     result = result | ((uint16_t) read_register16(Reg16_SP::SP) << 8);
     write_register16(Reg16_SP::SP, read_register16(Reg16_SP::SP) + 1);
 
-    std::cout << "result: " << std::hex << (unsigned int) result << std::dec << std::endl;
     return result;
 }
 
@@ -999,11 +1010,11 @@ void GbE::load_aReg16_A(Reg16_Addr reg)
     } else if (reg == Reg16_Addr::DE) {
         addr = read_register16(Reg16::DE);
     } else if (reg == Reg16_Addr::HLD) {
-        std::cout << "its decrement" << std::endl;
+        //std::cout << "its decrement" << std::endl;
         addr = read_register16(Reg16::HL);
         write_register16(Reg16::HL, addr - 1);
     } else if (reg == Reg16_Addr::HLI) {
-        std::cout << "its increment" << std::endl;
+        //std::cout << "its increment" << std::endl;
         addr = read_register16(Reg16::HL);
         write_register16(Reg16::HL, addr + 1);
     }
