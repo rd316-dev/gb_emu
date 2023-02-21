@@ -185,6 +185,13 @@ void GbE::dma_cycle(uint8_t machine_cycles)
     }
 }
 
+void GbE::start_dma(uint8_t src)
+{
+    dma_src_addr = src << 8;
+    dma_dest_addr = 0xFE00;
+    dma_started = true;
+}
+
 void GbE::ppu_cycle(uint8_t machine_cycles)
 {
     int current_scanline = current_dot / 456;
@@ -213,13 +220,6 @@ void GbE::ppu_cycle(uint8_t machine_cycles)
     } else {
         // vblank
     }
-}
-
-void GbE::start_dma(uint8_t src)
-{
-    dma_src_addr = src << 8;
-    dma_dest_addr = 0xFE00;
-    dma_started = true;
 }
 
 void GbE::unknown() {}
@@ -1015,10 +1015,9 @@ void GbE::load_a16_SP()
 uint16_t GbE::pop16()
 {
     uint16_t result = read_memory(read_register16(Reg16_SP::SP));
-    write_register16(Reg16_SP::SP, read_register16(Reg16_SP::SP) + 1);
 
-    result = result | ((uint16_t) read_register16(Reg16_SP::SP) << 8);
-    write_register16(Reg16_SP::SP, read_register16(Reg16_SP::SP) + 1);
+    result = result | ((uint16_t) read_memory(read_register16(Reg16_SP::SP) + 1) << 8);
+    write_register16(Reg16_SP::SP, read_register16(Reg16_SP::SP) + 2);
 
     return result;
 }
@@ -1031,11 +1030,8 @@ void GbE::pop(Reg16 reg)
 void GbE::push16(uint16_t val)
 {
     //std::cout << "pop16: " << std::hex << (unsigned int) val << std::dec << std::endl;
-    write_register16(Reg16_SP::SP, read_register16(Reg16_SP::SP) - 1);
-    write_memory(read_register16(Reg16_SP::SP), (uint8_t) (val >> 8));
-
-    write_register16(Reg16_SP::SP, read_register16(Reg16_SP::SP) - 1);
-    write_memory(read_register16(Reg16_SP::SP), (uint8_t) (val & 0xFF));
+    write_memory(read_register16(Reg16_SP::SP) - 1, (uint8_t) (val >> 8));
+    write_memory(read_register16(Reg16_SP::SP) - 2, (uint8_t) (val & 0xFF));
 
     write_register16(Reg16_SP::SP, read_register16(Reg16_SP::SP) - 2);
 }
