@@ -25,7 +25,7 @@ std::shared_ptr<uint8_t*> load_file(std::string path, size_t *size)
     return std::make_shared<uint8_t*>(data);
 }
 
-void debuggerRegisters(const GbE *emu)
+void debuggerRegisters(GbE *emu)
 {
     if (ImGui::BeginTable("Registers", 7)) {
         ImGui::TableNextRow();
@@ -41,6 +41,30 @@ void debuggerRegisters(const GbE *emu)
             ImGui::TableNextColumn();
             ImGui::Text("%02X", emu->read_register8(r));
         }
+
+        ImGui::EndTable();
+    }
+}
+
+void debuggerFlags(const GbE *emu)
+{
+    if (ImGui::BeginTable("Flags", 4)) {
+        ImGui::TableNextRow();
+        char names[] = {'Z', 'N', 'H', 'C'};
+        for (char c : names) {
+            ImGui::TableNextColumn();
+            ImGui::Text("%c", c);
+        }
+
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::Text("%d", emu->get_Z() ? 1 : 0);
+        ImGui::TableNextColumn();
+        ImGui::Text("%d", emu->get_N() ? 1 : 0);
+        ImGui::TableNextColumn();
+        ImGui::Text("%d", emu->get_H() ? 1 : 0);
+        ImGui::TableNextColumn();
+        ImGui::Text("%d", emu->get_C() ? 1 : 0);
 
         ImGui::EndTable();
     }
@@ -83,12 +107,14 @@ int main()
     emu.load_boot_rom(boot_rom_size, boot_rom);
 
     size_t rom_size = 0;
-    auto rom = load_file("C:\\Projects\\gb_emu\\resource\\test_rom.gb", &rom_size);
+    auto rom = load_file("C:\\Projects\\gb_emu\\resource\\01-special.gb", &rom_size);
     emu.load_rom(rom_size, rom);
 
-    //uint16_t breakpoint = 0x9f;
+    uint16_t breakpoints[] = {0x200};
+    bool use_breakpoints = true;
     bool breakpoint_reached = false;
-    bool auto_execution_enabled = false;
+    bool cycling_enabled = true;
+    bool stop_at_0x0100 = true;
 
     SDL_Event e;
     bool quit = false;
@@ -116,71 +142,75 @@ int main()
         ImGui::End();
 
         ImGui::Begin("Registers");
-        ImGui::Text("PC: %#04X\n ", emu.get_PC());
+        ImGui::Text("PC: %#04x\n ", emu.get_PC());
 
-        if (ImGui::BeginTable("Registers", 7)) {
-            ImGui::TableNextRow();
-            char names[] = {'A', 'B', 'C', 'D', 'E', 'H', 'L'};
-            for (char c : names) {
-                ImGui::TableNextColumn();
-                ImGui::Text("%c", c);
-            }
-            Reg8 regs[] = {Reg8::A, Reg8::B, Reg8::C, Reg8::D, Reg8::E, Reg8::H, Reg8::L};
+        debuggerRegisters(&emu);
+        debuggerFlags(&emu);
 
-            ImGui::TableNextRow();
-            for (Reg8 r : regs) {
-                ImGui::TableNextColumn();
-                ImGui::Text("%02X", emu.read_register8(r));
-            }
+        if (cycling_enabled && !breakpoint_reached) {
+            for (int i = 0; i < 18000; i++) {
+                emu.execute();
 
-            ImGui::EndTable();
-        }
+                if (emu.isHalted()) {
+                    std::cout << "Received HALT" << std::endl;
+                    breakpoint_reached = true;
+                    break;
+                } else if (emu.isStopped()) {
+                    std::cout << "Received STOP" << std::endl;
+                    breakpoint_reached = true;
+                    break;
+                }
 
-        if (ImGui::BeginTable("Flags", 4)) {
-            ImGui::TableNextRow();
-            char names[] = {'Z', 'N', 'H', 'C'};
-            for (char c : names) {
-                ImGui::TableNextColumn();
-                ImGui::Text("%c", c);
-            }
+                if (use_breakpoints) {
+                    uint16_t pc = emu.get_PC();
 
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            ImGui::Text("%d", emu.get_Z() ? 1 : 0);
-            ImGui::TableNextColumn();
-            ImGui::Text("%d", emu.get_N() ? 1 : 0);
-            ImGui::TableNextColumn();
-            ImGui::Text("%d", emu.get_H() ? 1 : 0);
-            ImGui::TableNextColumn();
-            ImGui::Text("%d", emu.get_C() ? 1 : 0);
+                    for (uint16_t addr : breakpoints) {
+                        if (addr == pc) {
+                            std::cout << "Breakpoint reached at " << std::hex
+                                      << (unsigned int) addr << std::dec <<std::endl;
+                            breakpoint_reached = true;
+                            break;
+                        }
+                    }
+                }
 
-            ImGui::EndTable();
-        }
-
-        if (auto_execution_enabled && !breakpoint_reached) {
-            emu.execute();
-
-            if (emu.isHalted()) {
-                std::cout << "Received HALT" << std::endl;
-                breakpoint_reached = true;
-            } else if (emu.isStopped()) {
-                std::cout << "Received STOP" << std::endl;
-                breakpoint_reached = true;
-            }
-            if (emu.get_PC() >= 0x100) {
-                std::cout << "Boot ROM execution finished. ROM started" << std::endl;
-                breakpoint_reached = true;
-            }
-
-            if (emu.get_PC() >= rom_size) {
-                breakpoint_reached = true;
-                std::cout << "Breakpoint at " << std::hex << std::setw(4) << std::setfill('0')
-                          << (unsigned int) emu.get_PC() << std::dec << " reached" << std::endl;
+                if (breakpoint_reached) {
+                    break;
+                }
             }
         }
 
         if (ImGui::Button("Cycle")) {
             emu.execute();
+            std::cout << std::hex << std::setw(4) << std::setfill('0')
+                      << (unsigned int) emu.get_last_PC() << "\t"
+                      << std::setw(2) << std::setfill('0')
+                      << (unsigned int) emu.get_last_opcode();
+
+            if (emu.get_last_opcode() == 0xCB) {
+                std::cout << (unsigned int) emu.get_last_CB_opcode();
+            }
+
+            std::cout << std::dec << std::endl;
+
+            if (emu.isHalted()) {
+                std::cout << "Received HALT" << std::endl;
+                break;
+            } else if (emu.isStopped()) {
+                std::cout << "Received STOP" << std::endl;
+                break;
+            }
+        }
+
+        if (cycling_enabled && !breakpoint_reached) {
+            if (ImGui::Button("Pause")) {
+                cycling_enabled = false;
+            }
+        } else {
+            if (ImGui::Button("Resume")) {
+                cycling_enabled = true;
+                breakpoint_reached = false;
+            }
         }
 
         ImGui::End();

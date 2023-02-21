@@ -48,11 +48,16 @@ class GbE
 public:
     GbE();
 
-    uint16_t get_PC();
+    void test_flags(int Z, int B, int H, int C);
 
     void load_boot_rom(const size_t &size, const std::shared_ptr<uint8_t*> boot_rom);
     void load_rom(const size_t &size, const std::shared_ptr<uint8_t*> rom);
     void execute();
+
+    uint16_t get_PC();
+    uint16_t get_last_PC() const;
+    uint8_t  get_last_opcode() const;
+    uint8_t  get_last_CB_opcode() const;
 
     bool isStopped() const;
     bool isHalted() const;
@@ -64,7 +69,7 @@ public:
 
     uint8_t  read_memory(uint16_t addr);
 
-    uint8_t  read_register8(Reg8 reg) const;
+    uint8_t  read_register8(Reg8 reg);
     uint16_t read_register16(Reg16 reg) const;
     uint16_t read_register16(Reg16_SP reg) const;
 
@@ -285,6 +290,13 @@ protected:
     size_t boot_rom_size    = 0;
     size_t rom_size         = 0;
     size_t external_ram_size= 0;
+
+    uint16_t last_PC = 0;
+    uint8_t last_opcode = 0;
+    uint8_t last_cb_opcode = 0;
+
+    uint8_t spi_byte = 0;
+    bool spi_started = false;
 
     CartidgeHeader header;
     MemoryMapper mapper;

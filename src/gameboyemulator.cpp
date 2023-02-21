@@ -19,13 +19,13 @@ GbE::GbE()
 
     for (int i = 0; i < 256; i++) {
         if (!itab[i]) {
-            std::cout << "instruction " << std::hex << (unsigned int) i << " doesn't have a lambda" << std::endl;
+            std::cout << "Opcode " << std::hex << (unsigned int) i << " doesn't have a lambda" << std::endl;
         }
     }
 
     for (int i = 0; i < 256; i++) {
         if (!cbtab[i]) {
-            std::cout << "cb instruction " << std::hex << (unsigned int) i << " doesn't have a lambda" << std::endl;
+            std::cout << "CB opcode " << std::hex << (unsigned int) i << " doesn't have a lambda" << std::endl;
         }
     }
 
@@ -33,6 +33,40 @@ GbE::GbE()
     wram = std::make_shared<uint8_t*>(new uint8_t[0x2000]);
     hram = std::make_shared<uint8_t*>(new uint8_t[0x7F]);
     oam  = std::make_shared<uint8_t*>(new uint8_t[0xA0]);
+}
+
+void GbE::test_flags(int Z, int N, int H, int C)
+{
+    if ((Z != -1) && (((bool) Z) != ((bool) get_Z()))) {
+        std::cout << "Z: expected " << (bool) Z << " got " << (bool) get_Z() << std::endl;
+    }
+
+    if ((N != -1) && (((bool) N) != ((bool) get_N()))) {
+        std::cout << "N: expected " << (bool) N << " got " << (bool) get_N() << std::endl;
+    }
+
+    if ((H != -1) && (((bool) H) != ((bool) get_H()))) {
+        std::cout << "H: expected " << (bool) H << " got " << (bool) get_H() << std::endl;
+    }
+
+    if ((C != -1) && (((bool) C) != ((bool) get_C()))) {
+        std::cout << "C: expected " << (bool) C << " got " << (bool) get_C() << std::endl;
+    }
+}
+
+uint16_t GbE::get_last_PC() const
+{
+    return last_PC;
+}
+
+uint8_t GbE::get_last_opcode() const
+{
+    return last_opcode;
+}
+
+uint8_t GbE::get_last_CB_opcode() const
+{
+    return last_cb_opcode;
 }
 
 bool GbE::isStopped() const
@@ -60,6 +94,18 @@ void GbE::load_boot_rom(const size_t &size, const std::shared_ptr<uint8_t*> boot
     this->boot_rom = boot_rom;
     this->boot_rom_mapped = true;
     this->PC = 0;
+
+    std::cout << "Boot ROM dump: \n" << std::hex << std::setw(2) << std::setfill('0');
+    for (int i = 0; i < 16; i++) {
+        for (int j = 0; j < 16; j++) {
+            uint16_t addr = (i * 16) + j;
+            std::cout << std::setw(2) << std::setfill('0') << (unsigned int) ((*this->boot_rom)[addr]) << " ";
+        }
+
+        std::cout << "\n";
+    }
+
+    std::cout << std::dec;
 
     std::cout << "Boot ROM loaded. Size: " << size << std::endl;
 }
@@ -95,27 +141,27 @@ void GbE::load_rom(const size_t &size, const std::shared_ptr<uint8_t*> rom)
     memcpy(&(header.global_checksum),   p + 0x14E, 2);
 
     std::cout << "ROM loaded. Size: " << size << std::endl;
+
+    std::cout << "From 0x200 to 0x210:" << std::endl;
+    for (int i = 0x200; i < 0x210; i++) {
+        std::cout << std::hex << std::setw(2) << std::setfill('0') << (unsigned int) ((*this->rom)[i]) << " ";
+    }
+
+    std::cout << std::dec << std::endl;
 }
 
 void GbE::execute()
 {
     used_cycles = 0;
-
-    std::cout << std::hex << std::setw(4) << std::setfill('0')
-              << (unsigned int) PC;
+    last_PC = PC;
 
     uint8_t inst = fetch();
-
-    std::cout << "\t" << std::setw(2) << std::setfill('0')
-              << (unsigned int) inst << std::dec << std::endl;
+    last_opcode = inst;
 
     itab[inst]();
 
     machine_cycle += used_cycles;
-
     int used = used_cycles;
-
-    //std::cout << "TOOK " << used << " CYCLES" << std::endl;
 
     if (dma_started)
         dma_cycle(used);
@@ -212,12 +258,6 @@ void GbE::init_instruction_table()
     itab[0xFB] = [this] { ei(); };
     itab[0xCB] = [this] { cb(); };
 
-    /*
-        instruction e2 doesn't have a lambda
-        instruction f0 doesn't have a lambda
-        instruction f9 doesn't have a lambda
-        instruction fb doesn't have a lambda
-     */
     enum AType {ADD, ADC, SUB, SBC, AND, XOR, OR, CP};
 
     for (int i = 0; i < 256; i++) {
@@ -521,7 +561,12 @@ void GbE::write_memory(uint16_t addr, uint8_t val)
         if (addr <= 0xFF00) {
             // joypad
         } else if (addr <= 0xFF02) {
-            std::cout << "Serial: " << val << " | " << std::hex << (unsigned int) val << std::dec << std::endl;
+            if (addr == 0xFF01) {
+                spi_byte = val;
+                std::cout << "SPI byte: " << spi_byte << std::endl;
+            } else if (addr == 0xFF02) {
+                spi_started = val & 0x80;
+            }
             // serial transfer
         } else if (addr <= 0xFF07) {
             // timer and divider
@@ -564,6 +609,7 @@ void GbE::write_memory(uint16_t addr, uint8_t val)
             // [cgb] vram bank select
         } else if (addr <= 0xFF50) {
             if (val) { // disable boot rom
+                std::cout << "boot rom unmapped at " << std::hex << addr << " | PC: " << last_PC << std::dec << std::endl;
                 boot_rom_mapped = false;
             }
         } else if (addr <= 0xFF55) {
@@ -602,7 +648,7 @@ bool GbE::carry_happened8(uint8_t val1, uint8_t val2) const
     return (0xFF - val1) < val2;
 }
 
-uint8_t GbE::read_register8(Reg8 reg) const
+uint8_t GbE::read_register8(Reg8 reg)
 {
     if (reg == Reg8::_HL) {
         // should it be the other way around?
@@ -627,7 +673,7 @@ void GbE::write_register8(Reg8 reg, uint8_t val)
     registers[(uint8_t) reg] = val;
 }
 
-uint16_t GbE::read_register16(Reg16 reg)
+uint16_t GbE::read_register16(Reg16 reg) const
 {
     uint8_t addr = ((uint8_t) reg) * 2;
 
@@ -642,7 +688,7 @@ void GbE::write_register16(Reg16 reg, uint16_t val)
     registers[addr+1] = (uint8_t) (val & 0xFF);
 }
 
-uint16_t GbE::read_register16(Reg16_SP reg)
+uint16_t GbE::read_register16(Reg16_SP reg) const
 {
     if (reg == Reg16_SP::SP)
         return SP;
@@ -696,34 +742,34 @@ void GbE::set_Z(bool val)
     if (val)
         registers[6] = registers[6] | 0x80;
     else
-        registers[6] = registers[6] ^ 0x80;
+        registers[6] = registers[6] & (0xFF ^ 0x80);
 }
 
 void GbE::set_N(bool val)
 {
-     // bit 6
+    // bit 6
     if (val)
         registers[6] = registers[6] | 0x40;
     else
-        registers[6] = registers[6] ^ 0x40;
+        registers[6] = registers[6] & (0xFF ^ 0x40);
 }
 
 void GbE::set_H(bool val)
 {
-     // bit 5
+    // bit 5
     if (val)
         registers[6] = registers[6] | 0x20;
     else
-        registers[6] = registers[6] ^ 0x20;
+        registers[6] = registers[6] & (0xFF ^ 0x20);
 }
 
 void GbE::set_C(bool val)
 {
-     // bit 4
+    // bit 4
     if (val)
         registers[6] = registers[6] | 0x10;
     else
-        registers[6] = registers[6] ^ 0x10;
+        registers[6] = registers[6] & (0xFF ^ 0x10);
 }
 
 uint8_t GbE::get_Z() const
@@ -801,8 +847,9 @@ void GbE::ei()
 void GbE::cb()
 {
     uint8_t inst = fetch();
-    std::cout << "    CB\t" << std::hex << (unsigned int) inst << std::dec << std::endl;
     cbtab[inst]();
+
+    last_cb_opcode = inst;
 }
 //===========Control==============
 
@@ -827,14 +874,14 @@ void GbE::rl_reg8(Reg8 reg, bool carry)
         bit0 = get_C();
     } else {
         bit0 = data >> 7;
-        set_C(bit0);
     }
 
     data = (data << 1) | bit0;
 
-    set_Z(~data);
+    set_Z(data == 0);
     set_N(0);
     set_H(0);
+    set_C(bit0);
 
     write_register8(reg, data);
 }
@@ -847,14 +894,14 @@ void GbE::rr_reg8(Reg8 reg, bool carry)
         bit7 = get_C();
     } else {
         bit7 = data << 7;
-        set_C(bit7);
     }
 
     data = (data >> 1) | bit7;
 
-    set_Z(~data);
+    set_Z(data == 0);
     set_N(0);
     set_H(0);
+    set_C(bit7);
 
     write_register8(reg, data);
 }
@@ -863,7 +910,7 @@ void GbE::sla_reg8(Reg8 reg)
 {
     uint8_t data = read_register8(reg);
 
-    set_Z(~data);
+    set_Z(data == 0);
     set_N(0);
     set_H(0);
     set_C(data >> 7);
@@ -875,7 +922,7 @@ void GbE::sra_reg8(Reg8 reg)
     uint8_t data = read_register8(reg);
     uint8_t bit7 = (data >> 7) << 7;
 
-    set_Z(~data);
+    set_Z(data == 0);
     set_N(0);
     set_H(0);
     set_C(data & 1);
@@ -889,7 +936,7 @@ void GbE::srl_reg8(Reg8 reg)
     set_C(data & 1);
     data = data >> 1;
 
-    set_Z(~data);
+    set_Z(data == 0);
     set_N(0);
     set_H(0);
 
@@ -904,7 +951,7 @@ void GbE::swap_reg8(Reg8 reg) {
 
     data = high | low;
 
-    set_Z(~data);
+    set_Z(data == 0);
     set_N(0);
     set_H(0);
     set_C(0);
@@ -920,6 +967,8 @@ void GbE::bit_reg8(Reg8 reg, uint8_t bit) {
     set_Z(!bitData);
     set_N(0);
     set_H(0);
+
+    test_flags(!bitData, 0, 0, -1);
 }
 
 void GbE::res_reg8(Reg8 reg, uint8_t bit) {
@@ -981,11 +1030,14 @@ void GbE::pop(Reg16 reg)
 
 void GbE::push16(uint16_t val)
 {
+    //std::cout << "pop16: " << std::hex << (unsigned int) val << std::dec << std::endl;
     write_register16(Reg16_SP::SP, read_register16(Reg16_SP::SP) - 1);
     write_memory(read_register16(Reg16_SP::SP), (uint8_t) (val >> 8));
 
     write_register16(Reg16_SP::SP, read_register16(Reg16_SP::SP) - 1);
-    write_memory(read_register16(Reg16_SP::SP), (uint8_t) val);
+    write_memory(read_register16(Reg16_SP::SP), (uint8_t) (val & 0xFF));
+
+    write_register16(Reg16_SP::SP, read_register16(Reg16_SP::SP) - 2);
 }
 
 void GbE::push(Reg16 reg)
@@ -1124,6 +1176,28 @@ void GbE::add_SP_s8()
 //======16-bit arithmetic=========
 
 //=======8-bit arithmetic=========
+void GbE::inc_reg8(Reg8 reg)
+{
+    uint8_t val = read_register8(reg);
+    uint8_t newVal = read_register8(reg) + 1;
+    write_register8(reg, newVal);
+
+    set_Z(newVal == 0);
+    set_N(0);
+    set_H(half_carry_happened8(val, 1));
+}
+
+void GbE::dec_reg8(Reg8 reg)
+{
+    uint8_t val = read_register8(reg);
+    uint8_t newVal = read_register8(reg) - 1;
+    write_register8(reg, newVal);
+
+    set_Z(newVal == 0);
+    set_N(1);
+    set_H(half_carry_happened8(val, -1));
+}
+
 void GbE::add_reg8(Reg8 reg)
 {
     uint8_t val1 = read_register8(Reg8::A);
@@ -1166,16 +1240,6 @@ void GbE::adc_reg8(Reg8 reg)
     write_register8(Reg8::A, result);
 }
 
-void GbE::inc_reg8(Reg8 reg)
-{
-    write_register8(reg, read_register8(reg) + 1);
-}
-
-void GbE::dec_reg8(Reg8 reg)
-{
-    write_register8(reg, read_register8(reg) - 1);
-}
-
 void GbE::adc_d8()
 {
     uint8_t val1 = read_register8(Reg8::A);
@@ -1197,7 +1261,7 @@ void GbE::sub_reg8(Reg8 reg)
     uint8_t result = val1 - val2;
 
     set_Z(result == 0);
-    set_N(true);
+    set_N(1);
     set_H(half_carry_happened8(val1, val2));
     set_C(carry_happened8(val1, val2));
 
@@ -1211,7 +1275,7 @@ void GbE::sub_d8()
     uint8_t result = val1 - val2;
 
     set_Z(result == 0);
-    set_N(true);
+    set_N(1);
     set_H(half_carry_happened8(val1, val2));
     set_C(carry_happened8(val1, val2));
 
@@ -1225,7 +1289,7 @@ void GbE::sbc_reg8(Reg8 reg)
     uint8_t result = val1 - val2 - get_C();
 
     set_Z(result == 0);
-    set_N(true);
+    set_N(1);
     set_H(half_carry_happened8(val1, val2));
     set_C(carry_happened8(val1, val2));
 
@@ -1239,7 +1303,7 @@ void GbE::sbc_d8()
     uint8_t result = val1 - val2 - get_C();
 
     set_Z(result == 0);
-    set_N(true);
+    set_N(1);
     set_H(half_carry_happened8(val1, val2));
     set_C(carry_happened8(val1, val2));
 
