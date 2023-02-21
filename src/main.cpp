@@ -10,9 +10,13 @@
 #include <fstream>
 #include <iomanip>
 
-std::shared_ptr<uint8_t*> load_file(std::string path, size_t *size)
+std::shared_ptr<uint8_t*> load_file(const std::string &path, size_t *size)
 {
     std::ifstream input(path, std::ios::binary);
+
+    if (!input.is_open()) {
+        std::cout << "Error while opening file " << path << std::endl;
+    }
 
     std::vector<uint8_t> buffer(std::istreambuf_iterator<char>(input), {});
     input.close();

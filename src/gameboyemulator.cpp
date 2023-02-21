@@ -1,6 +1,5 @@
 #include "gameboyemulator.h"
 
-#define _DEBUG_
 #include <iostream>
 #include <string>
 #include <iomanip>
@@ -15,67 +14,21 @@ GbE::GbE()
     init_instruction_table();
     init_cb_instruction_table();
 
-    vram = std::make_shared<uint8_t*>(new uint8_t[0x2000]);
-    wram = std::make_shared<uint8_t*>(new uint8_t[0x2000]);
-    hram = std::make_shared<uint8_t*>(new uint8_t[0x7F]);
-    oam  = std::make_shared<uint8_t*>(new uint8_t[0xA0]);
+    vram = (uint8_t*) malloc(sizeof(uint8_t) * 0x2000);
+    wram = (uint8_t*) malloc(sizeof(uint8_t) * 0x2000);
+    oam  = (uint8_t*) malloc(sizeof(uint8_t) * 0xA0);
+    hram = (uint8_t*) malloc(sizeof(uint8_t) * 0x7F);
 }
 
-const std::vector<uint8_t> GbE::get_spi_buffer_data() const
+GbE::~GbE()
 {
-    return spi_buffer;
+    free(vram);
+    free(wram);
+    free(oam);
+    free(hram);
 }
 
-void GbE::test_flags(int Z, int N, int H, int C)
-{
-    if ((Z != -1) && (((bool) Z) != ((bool) get_Z()))) {
-        std::cout << "Z: expected " << (bool) Z << " got " << (bool) get_Z() << std::endl;
-    }
-
-    if ((N != -1) && (((bool) N) != ((bool) get_N()))) {
-        std::cout << "N: expected " << (bool) N << " got " << (bool) get_N() << std::endl;
-    }
-
-    if ((H != -1) && (((bool) H) != ((bool) get_H()))) {
-        std::cout << "H: expected " << (bool) H << " got " << (bool) get_H() << std::endl;
-    }
-
-    if ((C != -1) && (((bool) C) != ((bool) get_C()))) {
-        std::cout << "C: expected " << (bool) C << " got " << (bool) get_C() << std::endl;
-    }
-}
-
-uint16_t GbE::get_last_PC() const
-{
-    return last_PC;
-}
-
-uint8_t GbE::get_last_opcode() const
-{
-    return last_opcode;
-}
-
-uint8_t GbE::get_last_CB_opcode() const
-{
-    return last_cb_opcode;
-}
-
-bool GbE::isStopped() const
-{
-    return stopped;
-}
-
-bool GbE::isHalted() const
-{
-    return halted;
-}
-
-uint16_t GbE::get_PC()
-{
-    return PC;
-}
-
-void GbE::load_boot_rom(const size_t &size, const std::shared_ptr<uint8_t*> boot_rom)
+void GbE::load_boot_rom(const size_t &size, std::shared_ptr<uint8_t*> boot_rom)
 {
     if (size < 0xFF) {
         std::cerr << "Error: Boot ROM size is lower than 256 bytes. Current Size: " << size << std::endl;
@@ -86,22 +39,12 @@ void GbE::load_boot_rom(const size_t &size, const std::shared_ptr<uint8_t*> boot
     this->boot_rom_mapped = true;
     this->PC = 0;
 
-    std::cout << "Boot ROM dump: \n" << std::hex << std::setw(2) << std::setfill('0');
-    for (int i = 0; i < 16; i++) {
-        for (int j = 0; j < 16; j++) {
-            uint16_t addr = (i * 16) + j;
-            std::cout << std::setw(2) << std::setfill('0') << (unsigned int) ((*this->boot_rom)[addr]) << " ";
-        }
-
-        std::cout << "\n";
-    }
-
     std::cout << std::dec;
 
     std::cout << "Boot ROM loaded. Size: " << size << std::endl;
 }
 
-void GbE::load_rom(const size_t &size, const std::shared_ptr<uint8_t*> rom)
+void GbE::load_rom(const size_t &size, std::shared_ptr<uint8_t*> rom)
 {
     // minimal size for a rom with a valid header is 335 bytes
     // 0x14F is the last byte of header
@@ -131,14 +74,13 @@ void GbE::load_rom(const size_t &size, const std::shared_ptr<uint8_t*> rom)
     memcpy(&(header.header_checksum),   p + 0x14D, 1);
     memcpy(&(header.global_checksum),   p + 0x14E, 2);
 
-    std::cout << "ROM loaded. Size: " << size << std::endl;
-
-    std::cout << "From 0x200 to 0x210:" << std::endl;
-    for (int i = 0x200; i < 0x210; i++) {
-        std::cout << std::hex << std::setw(2) << std::setfill('0') << (unsigned int) ((*this->rom)[i]) << " ";
+    std::cout << "part of rom: \n" << std::hex;
+    for (int i = 100; i < 150; i++) {
+        std::cout << std::setfill('0') << std::setw(2) << (*(this->rom))[i] << " ";
     }
+    std::cout << std::endl;
 
-    std::cout << std::dec << std::endl;
+    std::cout << "ROM loaded. Size: " << size << std::endl;
 }
 
 void GbE::execute()
@@ -186,6 +128,10 @@ void GbE::ppu_cycle()
                 } else {
                     int x = ((scx / 8) + fetcher_x) & 0x1F;
                 }
+            } else if (fetcher_step == 1) {
+
+            } else if (fetcher_step == 2) {
+
             }
         }
     } else {
@@ -227,14 +173,14 @@ uint8_t GbE::read_memory(uint16_t addr)
     if (addr <= 0x00FF && boot_rom_mapped) return (*boot_rom)[addr];
     else if (addr <= 0x3FFF) return (*rom)[mapper.convert_rom0_addr(addr)];
     else if (addr <= 0x7FFF) return (*rom)[mapper.convert_romN_addr(addr)];
-    else if (addr <= 0x9FFF) return (*vram)[addr - 0x8000];
+    else if (addr <= 0x9FFF) return vram[addr - 0x8000];
     else if (addr <= 0xBFFF) return (*external_ram)[mapper.convert_ram_addr(addr)];
 
-    else if (addr <= 0xCFFF) return (*wram)[addr - 0xC000];
-    else if (addr <= 0xDFFF) return (*wram)[addr - 0xC000];
-    else if (addr <= 0xFDFF) return (*wram)[addr - 0xC000];
+    else if (addr <= 0xCFFF) return wram[addr - 0xC000];
+    else if (addr <= 0xDFFF) return wram[addr - 0xC000];
+    else if (addr <= 0xFDFF) return wram[addr - 0xE000];
 
-    else if (addr <= 0xFE9F) return (*oam)[addr - 0xFE00];
+    else if (addr <= 0xFE9F) return oam[addr - 0xFE00];
     else if (addr <= 0xFEFF) return 0xFF; // not usable
     else if (addr <= 0xFF7F) {
         if (addr <= 0xFF00) {
@@ -274,7 +220,7 @@ uint8_t GbE::read_memory(uint16_t addr)
             unknown();
         }
     }
-    else if (addr <= 0xFFFE) return (*hram)[addr - 0xFF80];
+    else if (addr <= 0xFFFE) return hram[addr - 0xFF80];
     else return interrupt_enabled;
 
     return 0xFF;
@@ -286,15 +232,15 @@ void GbE::write_memory(uint16_t addr, uint8_t val)
 
     if      (addr <= 0x3FFF) mapper.handle_rom0_write(addr, val);
     else if (addr <= 0x7FFF) mapper.handle_romN_write(addr, val);
-    else if (addr <= 0x9FFF) (*vram)[addr - 0x8000] = val;
+    else if (addr <= 0x9FFF) vram[addr - 0x8000] = val;
     else if (addr <= 0xBFFF) {
         if (!mapper.handle_ram_write(addr, val))
             (*external_ram)[mapper.convert_ram_addr(addr)] = val;
     }
-    else if (addr <= 0xCFFF) (*wram)[addr - 0xC000] = val;
-    else if (addr <= 0xDFFF) (*wram)[addr - 0xC000] = val;
-    else if (addr <= 0xFDFF) (*wram)[addr - 0xC000] = val;
-    else if (addr <= 0xFE9F) (*oam)[addr - 0xFE00] = val;
+    else if (addr <= 0xCFFF) wram[addr - 0xC000] = val;
+    else if (addr <= 0xDFFF) wram[addr - 0xC000] = val;
+    else if (addr <= 0xFDFF) wram[addr - 0xE000] = val;
+    else if (addr <= 0xFE9F) oam[addr - 0xFE00] = val;
     else if (addr <= 0xFEFF) unknown();
     else if (addr <= 0xFF80) {
         if (addr <= 0xFF00) {
@@ -302,6 +248,8 @@ void GbE::write_memory(uint16_t addr, uint8_t val)
         } else if (addr <= 0xFF02) {
             if (addr == 0xFF01) {
                 spi_byte = val;
+
+                std::cout << spi_byte;
                 if (debug_write_spi_to_buffer) {
                     spi_buffer.push_back(val);
                 }
@@ -373,11 +321,64 @@ void GbE::write_memory(uint16_t addr, uint8_t val)
             unknown();
         }
     }
-    else if (addr <= 0xFFFF)
-        (*hram)[addr - 0xFF80] = val;
-    else
-        interrupt_enabled = val;
+    else if (addr <= 0xFFFE) hram[addr - 0xFF80] = val;
+    else                     interrupt_enabled = val;
 }
+
+const std::vector<uint8_t> GbE::get_spi_buffer_data() const
+{
+    return spi_buffer;
+}
+
+void GbE::test_flags(int Z, int N, int H, int C)
+{
+    if ((Z != -1) && (((bool) Z) != ((bool) get_Z()))) {
+        std::cout << "Z: expected " << (bool) Z << " got " << (bool) get_Z() << std::endl;
+    }
+
+    if ((N != -1) && (((bool) N) != ((bool) get_N()))) {
+        std::cout << "N: expected " << (bool) N << " got " << (bool) get_N() << std::endl;
+    }
+
+    if ((H != -1) && (((bool) H) != ((bool) get_H()))) {
+        std::cout << "H: expected " << (bool) H << " got " << (bool) get_H() << std::endl;
+    }
+
+    if ((C != -1) && (((bool) C) != ((bool) get_C()))) {
+        std::cout << "C: expected " << (bool) C << " got " << (bool) get_C() << std::endl;
+    }
+}
+
+uint16_t GbE::get_last_PC() const
+{
+    return last_PC;
+}
+
+uint8_t GbE::get_last_opcode() const
+{
+    return last_opcode;
+}
+
+uint8_t GbE::get_last_CB_opcode() const
+{
+    return last_cb_opcode;
+}
+
+bool GbE::isStopped() const
+{
+    return stopped;
+}
+
+bool GbE::isHalted() const
+{
+    return halted;
+}
+
+uint16_t GbE::get_PC()
+{
+    return PC;
+}
+
 
 bool GbE::half_carry_happened16(uint16_t val1, uint16_t val2) const
 {
@@ -838,8 +839,6 @@ void GbE::init_cb_instruction_table()
     }
 }
 
-
-
 //===========Control==============
 void GbE::nop()
 {
@@ -858,7 +857,36 @@ void GbE::halt()
 
 void GbE::daa()
 {
-    unimplemented("daa");
+    bool N_flag = get_N();
+    bool C_flag = get_C();
+    bool H_flag = get_H();
+
+    uint8_t A = read_register8(Reg8::A);
+
+    if (!N_flag) {
+        if (C_flag || A > 0x99) {
+            A += 0x60;
+            set_C(1);
+        }
+
+        if (H_flag || (A & 0x0f) > 0x09) {
+            A += 0x6;
+        }
+    } else {
+        if (C_flag) {
+            A -= 0x60;
+        }
+
+        if (H_flag) {
+            A -= 0x6;
+        }
+    }
+
+    write_register8(Reg8::A, A);
+
+    set_Z(A == 0);
+    set_H(0);
+
 }
 
 void GbE::scf()

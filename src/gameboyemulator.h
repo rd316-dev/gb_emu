@@ -47,11 +47,12 @@ class GbE
 {
 public:
     GbE();
+    ~GbE();
 
     void test_flags(int Z, int B, int H, int C);
 
-    void load_boot_rom(const size_t &size, const std::shared_ptr<uint8_t*> boot_rom);
-    void load_rom(const size_t &size, const std::shared_ptr<uint8_t*> rom);
+    void load_boot_rom(const size_t &size, std::shared_ptr<uint8_t*> boot_rom);
+    void load_rom(const size_t &size, std::shared_ptr<uint8_t*> rom);
     void execute();
 
     uint16_t get_PC();
@@ -289,7 +290,7 @@ protected:
     uint8_t last_opcode = 0;
     uint8_t last_cb_opcode = 0;
 
-    bool debug_write_spi_to_buffer = true;
+    bool debug_write_spi_to_buffer = false;
     std::vector<uint8_t> spi_buffer;
     uint8_t spi_byte = 0;
     bool spi_started = false;
@@ -304,10 +305,10 @@ protected:
     uint16_t frame_buffer_2[160*144] = {};
     uint16_t* current_frame_buffer = frame_buffer_1;
 
-    std::shared_ptr<uint8_t*> wram;
-    std::shared_ptr<uint8_t*> vram;
-    std::shared_ptr<uint8_t*> hram;
-    std::shared_ptr<uint8_t*> oam;
+    uint8_t* wram;
+    uint8_t* vram;
+    uint8_t* hram;
+    uint8_t* oam;
 
     std::shared_ptr<uint8_t*> boot_rom;
     std::shared_ptr<uint8_t*> rom;
