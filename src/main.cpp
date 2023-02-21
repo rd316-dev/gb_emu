@@ -110,8 +110,8 @@ int main()
     auto rom = load_file("C:\\Projects\\gb_emu\\resource\\01-special.gb", &rom_size);
     emu.load_rom(rom_size, rom);
 
-    uint16_t breakpoints[] = {0x200};
-    bool use_breakpoints = true;
+    uint16_t breakpoints[] = {0x100};
+    bool use_breakpoints = false;
     bool breakpoint_reached = false;
     bool cycling_enabled = true;
     bool stop_at_0x0100 = true;
@@ -211,6 +211,12 @@ int main()
                 cycling_enabled = true;
                 breakpoint_reached = false;
             }
+        }
+
+        if (ImGui::Button("Print SPI")) {
+            std::cout << "SPI buffer data:\n"
+                      << emu.get_spi_buffer_data().data() << std::endl
+                      << "SPI buffer data end" << std::endl;
         }
 
         ImGui::End();

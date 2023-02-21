@@ -58,6 +58,7 @@ public:
     uint16_t get_last_PC() const;
     uint8_t  get_last_opcode() const;
     uint8_t  get_last_CB_opcode() const;
+    const std::vector<uint8_t> get_spi_buffer_data() const;
 
     bool isStopped() const;
     bool isHalted() const;
@@ -83,7 +84,6 @@ public:
 
     bool carry_happened16(uint16_t val1, uint16_t val2) const;
     bool carry_happened8(uint8_t val1, uint8_t val2) const;
-
 protected:
     void init_instruction_table();
     void init_cb_instruction_table();
@@ -92,7 +92,7 @@ protected:
 
     void start_dma(uint8_t src);
     void dma_cycle(uint8_t machine_cycles);
-    void ppu_cycle(uint8_t machine_cycles);
+    void ppu_cycle();
 
     //===========Control==============
     void nop();
@@ -239,8 +239,8 @@ protected:
     uint8_t scy     = 0;
     uint8_t scx     = 0;
 
-    uint8_t ly      = 0;
-    uint8_t lyc     = 0;
+    uint8_t LY      = 0;
+    uint8_t LYC     = 0;
 
     uint8_t wy      = 0;
     uint8_t wx      = 0;
@@ -266,12 +266,6 @@ protected:
     bool stopped        = false;
     bool halted         = false;
 
-    bool ppu_enabled                = false;
-    bool window_tile_map_area       = false;
-    bool window_enabled             = false;
-    bool bg_window_tile_data_area   = false;
-    bool bg_tile_map_area           = false;
-
     bool vram_accessible    = true;
     bool oam_accessible     = true;
     bool boot_rom_mapped    = true;
@@ -295,6 +289,8 @@ protected:
     uint8_t last_opcode = 0;
     uint8_t last_cb_opcode = 0;
 
+    bool debug_write_spi_to_buffer = true;
+    std::vector<uint8_t> spi_buffer;
     uint8_t spi_byte = 0;
     bool spi_started = false;
 

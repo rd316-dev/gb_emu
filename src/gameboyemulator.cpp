@@ -7,7 +7,7 @@
 
 void unimplemented(std::string name)
 {
-    std::cerr << name << " is unimplemented" << std::endl;
+    std::cout << name << " is unimplemented" << std::endl;
 }
 
 GbE::GbE()
@@ -15,24 +15,15 @@ GbE::GbE()
     init_instruction_table();
     init_cb_instruction_table();
 
-    // check both tables
-
-    for (int i = 0; i < 256; i++) {
-        if (!itab[i]) {
-            std::cout << "Opcode " << std::hex << (unsigned int) i << " doesn't have a lambda" << std::endl;
-        }
-    }
-
-    for (int i = 0; i < 256; i++) {
-        if (!cbtab[i]) {
-            std::cout << "CB opcode " << std::hex << (unsigned int) i << " doesn't have a lambda" << std::endl;
-        }
-    }
-
     vram = std::make_shared<uint8_t*>(new uint8_t[0x2000]);
     wram = std::make_shared<uint8_t*>(new uint8_t[0x2000]);
     hram = std::make_shared<uint8_t*>(new uint8_t[0x7F]);
     oam  = std::make_shared<uint8_t*>(new uint8_t[0xA0]);
+}
+
+const std::vector<uint8_t> GbE::get_spi_buffer_data() const
+{
+    return spi_buffer;
 }
 
 void GbE::test_flags(int Z, int N, int H, int C)
@@ -165,34 +156,14 @@ void GbE::execute()
 
     if (dma_started)
         dma_cycle(used);
-    if (ppu_enabled)
-        ppu_cycle(used);
-}
-
-void GbE::dma_cycle(uint8_t machine_cycles)
-{
-    for (int i = 0; i < machine_cycles; i++) {
-        write_memory(dma_dest_addr, read_memory(dma_src_addr));
-        dma_src_addr++;
-        dma_dest_addr++;
-
-        if (dma_dest_addr > 0xFE9F) {
-            dma_started = false;
-            dma_src_addr = 0;
-            dma_dest_addr = 0;
-            break;
+    if (lcdc.lcd_ppu_enabled) {
+        for (int i = 0; i < used * 4; i++) {
+            ppu_cycle();
         }
     }
 }
 
-void GbE::start_dma(uint8_t src)
-{
-    dma_src_addr = src << 8;
-    dma_dest_addr = 0xFE00;
-    dma_started = true;
-}
-
-void GbE::ppu_cycle(uint8_t machine_cycles)
+void GbE::ppu_cycle()
 {
     int current_scanline = current_dot / 456;
     int scanline_dot = current_dot % 456;
@@ -220,6 +191,366 @@ void GbE::ppu_cycle(uint8_t machine_cycles)
     } else {
         // vblank
     }
+
+    LY = current_scanline;
+
+    current_dot++;
+}
+
+void GbE::dma_cycle(uint8_t machine_cycles)
+{
+    for (int i = 0; i < machine_cycles; i++) {
+        write_memory(dma_dest_addr, read_memory(dma_src_addr));
+        dma_src_addr++;
+        dma_dest_addr++;
+
+        if (dma_dest_addr > 0xFE9F) {
+            dma_started = false;
+            dma_src_addr = 0;
+            dma_dest_addr = 0;
+            break;
+        }
+    }
+}
+
+void GbE::start_dma(uint8_t src)
+{
+    dma_src_addr = src << 8;
+    dma_dest_addr = 0xFE00;
+    dma_started = true;
+}
+
+uint8_t GbE::read_memory(uint16_t addr)
+{
+    used_cycles++;
+
+    if (addr <= 0x00FF && boot_rom_mapped) return (*boot_rom)[addr];
+    else if (addr <= 0x3FFF) return (*rom)[mapper.convert_rom0_addr(addr)];
+    else if (addr <= 0x7FFF) return (*rom)[mapper.convert_romN_addr(addr)];
+    else if (addr <= 0x9FFF) return (*vram)[addr - 0x8000];
+    else if (addr <= 0xBFFF) return (*external_ram)[mapper.convert_ram_addr(addr)];
+
+    else if (addr <= 0xCFFF) return (*wram)[addr - 0xC000];
+    else if (addr <= 0xDFFF) return (*wram)[addr - 0xC000];
+    else if (addr <= 0xFDFF) return (*wram)[addr - 0xC000];
+
+    else if (addr <= 0xFE9F) return (*oam)[addr - 0xFE00];
+    else if (addr <= 0xFEFF) return 0xFF; // not usable
+    else if (addr <= 0xFF7F) {
+        if (addr <= 0xFF00) {
+            // joypad
+        } else if (addr <= 0xFF02) {
+            // serial transfer
+        } else if (addr <= 0xFF07) {
+            // timer and divider
+        } else if (addr <= 0xFF26) {
+            // audio
+        } else if (addr <= 0xFF3F) {
+            // wave pattern
+        } else if (addr <= 0xFF4B) {
+            if (addr == 0xFF42) {
+                // scy
+            } else if (addr == 0xFF43) {
+                // scx
+            } else if (addr == 0xFF44) {
+                return LY;
+            } else if (addr == 0xFF45) {
+                return LYC;
+            } else if (addr == 0xFF46) {
+                return dma_src_addr;
+            }
+            // lcd
+        } else if (addr <= 0xFF4F) {
+            // [cgb] vram bank select
+        } else if (addr <= 0xFF50) {
+            // disable boot rom
+        } else if (addr <= 0xFF55) {
+            // [cgb] vram dma
+        } else if (addr <= 0xFF69) {
+            // [cgb] bg/obj palettes
+        } else if (addr <= 0xFF70) {
+            // [cgb] wram bank select
+        } else {
+            unknown();
+        }
+    }
+    else if (addr <= 0xFFFE) return (*hram)[addr - 0xFF80];
+    else return interrupt_enabled;
+
+    return 0xFF;
+}
+
+void GbE::write_memory(uint16_t addr, uint8_t val)
+{
+    used_cycles++;
+
+    if      (addr <= 0x3FFF) mapper.handle_rom0_write(addr, val);
+    else if (addr <= 0x7FFF) mapper.handle_romN_write(addr, val);
+    else if (addr <= 0x9FFF) (*vram)[addr - 0x8000] = val;
+    else if (addr <= 0xBFFF) {
+        if (!mapper.handle_ram_write(addr, val))
+            (*external_ram)[mapper.convert_ram_addr(addr)] = val;
+    }
+    else if (addr <= 0xCFFF) (*wram)[addr - 0xC000] = val;
+    else if (addr <= 0xDFFF) (*wram)[addr - 0xC000] = val;
+    else if (addr <= 0xFDFF) (*wram)[addr - 0xC000] = val;
+    else if (addr <= 0xFE9F) (*oam)[addr - 0xFE00] = val;
+    else if (addr <= 0xFEFF) unknown();
+    else if (addr <= 0xFF80) {
+        if (addr <= 0xFF00) {
+            // joypad
+        } else if (addr <= 0xFF02) {
+            if (addr == 0xFF01) {
+                spi_byte = val;
+                if (debug_write_spi_to_buffer) {
+                    spi_buffer.push_back(val);
+                }
+            } else if (addr == 0xFF02) {
+                spi_started = val & 0x80;
+            }
+            // serial transfer
+        } else if (addr <= 0xFF07) {
+            // timer and divider
+        } else if (addr <= 0xFF26) {
+            // audio
+        } else if (addr <= 0xFF3F) {
+            // wave pattern
+        } else if (addr <= 0xFF4B) {
+            // lcd
+            switch (addr) {
+            case 0xFF40: // lcdc
+                lcdc = {
+                    (bool) (val & 0x80),
+                    (bool) (val & 0x40),
+                    (bool) (val & 0x20),
+                    (bool) (val & 0x10),
+                    (bool) (val & 0x08),
+                    (bool) (val & 0x04),
+                    (bool) (val & 0x02),
+                    (bool) (val & 0x01)
+                };
+                break;
+            case 0xFF41: // stat
+                break;
+            case 0xFF42: // scx
+                scx = val;
+                break;
+            case 0xFF43:
+                scy = val; // scy
+                break;
+            case 0xFF44:
+                break;
+            case 0xFF45:
+                break;
+            case 0xFF46:
+                start_dma(val);
+                break;
+            case 0xFF47:
+                break;
+            case 0xFF48:
+                break;
+            case 0xFF49:
+                break;
+            case 0xFF4A:
+                break;
+            case 0xFF4B:
+                break;
+            }
+        } else if (addr <= 0xFF4F) {
+            // [cgb] vram bank select
+        } else if (addr <= 0xFF50) {
+            if (val) { // disable boot rom
+                std::cout << "boot rom unmapped at " << std::hex << addr << " | PC: " << last_PC << std::dec << std::endl;
+                boot_rom_mapped = false;
+            }
+        } else if (addr <= 0xFF55) {
+            // [cgb] vram dma
+        } else if (addr <= 0xFF69) {
+            // [cgb] bg/obj palettes
+        } else if (addr <= 0xFF70) {
+            // [cgb] wram bank select
+        } else {
+            unknown();
+        }
+    }
+    else if (addr <= 0xFFFF)
+        (*hram)[addr - 0xFF80] = val;
+    else
+        interrupt_enabled = val;
+}
+
+bool GbE::half_carry_happened16(uint16_t val1, uint16_t val2) const
+{
+    return (((val1 & 0xFFF) + (val2 & 0xFFF)) & 0x1000) == 0x1000;
+}
+
+bool GbE::half_carry_happened8(uint8_t val1, uint8_t val2) const
+{
+    return (((val1 & 0xF) + (val2 & 0xF)) & 0x10) == 0x10;
+}
+
+bool GbE::carry_happened16(uint16_t val1, uint16_t val2) const
+{
+    return (0xFFFF - val1) < val2;
+}
+
+bool GbE::carry_happened8(uint8_t val1, uint8_t val2) const
+{
+    return (0xFF - val1) < val2;
+}
+
+uint8_t GbE::read_register8(Reg8 reg)
+{
+    if (reg == Reg8::_HL) {
+        // should it be the other way around?
+        uint16_t addr = read_register8(Reg8::L);
+        addr = addr | ((uint16_t) read_register8(Reg8::H) << 8);
+
+        return read_memory(addr);
+    }
+
+    return registers[(uint8_t) reg];
+}
+
+void GbE::write_register8(Reg8 reg, uint8_t val)
+{
+    if (reg == Reg8::_HL) {
+        uint16_t addr = read_register16(Reg16::HL);
+        write_memory(addr, val);
+
+        return;
+    }
+
+    registers[(uint8_t) reg] = val;
+}
+
+uint16_t GbE::read_register16(Reg16 reg) const
+{
+    if (reg == Reg16::AF) {
+        return registers[7] << 8 | registers[6];
+    }
+
+    uint8_t addr = ((uint8_t) reg) * 2;
+
+    return (registers[addr] << 8) | registers[addr+1];
+}
+
+void GbE::write_register16(Reg16 reg, uint16_t val)
+{
+    if (reg == Reg16::AF) {
+        registers[7] = (uint8_t) (val >> 8);
+        registers[6] = (uint8_t) (val & 0xF0);
+        return;
+    }
+
+    uint8_t addr = ((uint8_t) reg) * 2;
+
+    registers[addr] = (uint8_t) (val >> 8);
+    registers[addr+1] = (uint8_t) (val & 0xFF);
+}
+
+uint16_t GbE::read_register16(Reg16_SP reg) const
+{
+    if (reg == Reg16_SP::SP)
+        return SP;
+
+    uint8_t addr = ((uint8_t) reg) * 2;
+    return (registers[addr] << 8) | registers[addr+1];
+}
+
+void GbE::write_register16(Reg16_SP reg, uint16_t val)
+{
+    if (reg == Reg16_SP::SP) {
+        SP = val;
+        return;
+    }
+
+    uint8_t addr = ((uint8_t) reg) * 2;
+
+    registers[addr] = (uint8_t) (val >> 8);
+    registers[addr+1] = (uint8_t) (val & 0xFF);
+}
+
+uint8_t GbE::fetch()
+{
+    return read_memory(PC++);
+}
+
+int8_t GbE::fetch_signed()
+{
+    return (int8_t) read_memory(PC++);
+}
+
+uint16_t GbE::fetch16()
+{
+    uint16_t result = read_memory(PC++);
+    result = result | (read_memory(PC++) << 8);
+
+    return result;
+}
+
+int16_t GbE::fetch16_signed()
+{
+    int16_t result = read_memory(PC++);
+    result = result | (((int16_t) read_memory(PC++)) << 8);
+
+    return result;
+}
+
+void GbE::set_Z(bool val)
+{
+    // bit 7
+    if (val)
+        registers[6] = registers[6] | 0x80;
+    else
+        registers[6] = registers[6] & (0xFF ^ 0x80);
+}
+
+void GbE::set_N(bool val)
+{
+    // bit 6
+    if (val)
+        registers[6] = registers[6] | 0x40;
+    else
+        registers[6] = registers[6] & (0xFF ^ 0x40);
+}
+
+void GbE::set_H(bool val)
+{
+    // bit 5
+    if (val)
+        registers[6] = registers[6] | 0x20;
+    else
+        registers[6] = registers[6] & (0xFF ^ 0x20);
+}
+
+void GbE::set_C(bool val)
+{
+    // bit 4
+    if (val)
+        registers[6] = registers[6] | 0x10;
+    else
+        registers[6] = registers[6] & (0xFF ^ 0x10);
+}
+
+uint8_t GbE::get_Z() const
+{
+    return registers[6] >> 7;
+}
+
+uint8_t GbE::get_N() const
+{
+    return (registers[6] >> 6) & 1;
+}
+
+uint8_t GbE::get_H() const
+{
+    return (registers[6] >> 5) & 1;
+}
+
+uint8_t GbE::get_C() const
+{
+    return (registers[6] >> 4) & 1;
 }
 
 void GbE::unknown() {}
@@ -312,7 +643,7 @@ void GbE::init_instruction_table()
                 inst = [this, y] { inc_reg8((Reg8) y); };
                 break;
             case 0x5:
-                inst = [this, y] { inc_reg8((Reg8) y); };
+                inst = [this, y] { dec_reg8((Reg8) y); };
                 break;
             case 0x6:
                 inst = [this, y] { load_reg8_d8((Reg8) y); };
@@ -437,6 +768,13 @@ void GbE::init_instruction_table()
         itab[excluded[i]] = [this] { unknown(); };
     }
 
+    for (int i = 0; i < 256; i++) {
+        if (!itab[i]) {
+            std::cout << "Opcode "
+                      << std::hex << (unsigned int) i
+                      << " doesn't have a lambda" << std::endl;
+        }
+    }
 }
 
 void GbE::init_cb_instruction_table()
@@ -490,307 +828,17 @@ void GbE::init_cb_instruction_table()
 
         cbtab[inst] = instruction;
     }
-}
 
-uint8_t GbE::read_memory(uint16_t addr)
-{
-    used_cycles++;
-
-    if (addr <= 0x00FF && boot_rom_mapped) return (*boot_rom)[addr];
-    else if (addr <= 0x3FFF) return (*rom)[mapper.convert_rom0_addr(addr)];
-    else if (addr <= 0x7FFF) return (*rom)[mapper.convert_romN_addr(addr)];
-    else if (addr <= 0x9FFF) return (*vram)[addr - 0x8000];
-    else if (addr <= 0xBFFF) return (*external_ram)[mapper.convert_ram_addr(addr)];
-
-    else if (addr <= 0xCFFF) return (*wram)[addr - 0xC000];
-    else if (addr <= 0xDFFF) return (*wram)[addr - 0xC000];
-    else if (addr <= 0xFDFF) return (*wram)[addr - 0xC000];
-
-    else if (addr <= 0xFE9F) return (*oam)[addr - 0xFE00];
-    else if (addr <= 0xFEFF) return 0xFF; // not usable
-    else if (addr <= 0xFF7F) {
-        if (addr <= 0xFF00) {
-            // joypad
-        } else if (addr <= 0xFF02) {
-            // serial transfer
-        } else if (addr <= 0xFF07) {
-            // timer and divider
-        } else if (addr <= 0xFF26) {
-            // audio
-        } else if (addr <= 0xFF3F) {
-            // wave pattern
-        } else if (addr <= 0xFF4B) {
-            // lcd
-        } else if (addr <= 0xFF4F) {
-            // [cgb] vram bank select
-        } else if (addr <= 0xFF50) {
-            // disable boot rom
-        } else if (addr <= 0xFF55) {
-            // [cgb] vram dma
-        } else if (addr <= 0xFF69) {
-            // [cgb] bg/obj palettes
-        } else if (addr <= 0xFF70) {
-            // [cgb] wram bank select
-        } else {
-            unknown();
+    for (int i = 0; i < 256; i++) {
+        if (!cbtab[i]) {
+            std::cout << "CB opcode "
+                      << std::hex << (unsigned int) i
+                      << " doesn't have a lambda" << std::endl;
         }
     }
-    else if (addr <= 0xFFFE) return (*hram)[addr - 0xFF80];
-    else return interrupt_enabled;
-
-    return 0xFF;
 }
 
-void GbE::write_memory(uint16_t addr, uint8_t val)
-{
-    used_cycles++;
 
-    if      (addr <= 0x3FFF) mapper.handle_rom0_write(addr, val);
-    else if (addr <= 0x7FFF) mapper.handle_romN_write(addr, val);
-    else if (addr <= 0x9FFF) (*vram)[addr - 0x8000] = val;
-    else if (addr <= 0xBFFF) {
-        if (!mapper.handle_ram_write(addr, val))
-            (*external_ram)[mapper.convert_ram_addr(addr)] = val;
-    }
-    else if (addr <= 0xCFFF) (*wram)[addr - 0xC000] = val;
-    else if (addr <= 0xDFFF) (*wram)[addr - 0xC000] = val;
-    else if (addr <= 0xFDFF) (*wram)[addr - 0xC000] = val;
-    else if (addr <= 0xFE9F) (*oam)[addr - 0xFE00] = val;
-    else if (addr <= 0xFEFF) unknown();
-    else if (addr <= 0xFF80) {
-        if (addr <= 0xFF00) {
-            // joypad
-        } else if (addr <= 0xFF02) {
-            if (addr == 0xFF01) {
-                spi_byte = val;
-                std::cout << "SPI byte: " << spi_byte << std::endl;
-            } else if (addr == 0xFF02) {
-                spi_started = val & 0x80;
-            }
-            // serial transfer
-        } else if (addr <= 0xFF07) {
-            // timer and divider
-        } else if (addr <= 0xFF26) {
-            // audio
-        } else if (addr <= 0xFF3F) {
-            // wave pattern
-        } else if (addr <= 0xFF4B) {
-            // lcd
-            switch (addr) {
-            case 0xFF40: // lcdc
-                break;
-            case 0xFF41: // stat
-                break;
-            case 0xFF42: // scx
-                scx = val;
-                break;
-            case 0xFF43:
-                scy = val; // scy
-                break;
-            case 0xFF44:
-                break;
-            case 0xFF45:
-                break;
-            case 0xFF46:
-                start_dma(val);
-                break;
-            case 0xFF47:
-                break;
-            case 0xFF48:
-                break;
-            case 0xFF49:
-                break;
-            case 0xFF4A:
-                break;
-            case 0xFF4B:
-                break;
-            }
-        } else if (addr <= 0xFF4F) {
-            // [cgb] vram bank select
-        } else if (addr <= 0xFF50) {
-            if (val) { // disable boot rom
-                std::cout << "boot rom unmapped at " << std::hex << addr << " | PC: " << last_PC << std::dec << std::endl;
-                boot_rom_mapped = false;
-            }
-        } else if (addr <= 0xFF55) {
-            // [cgb] vram dma
-        } else if (addr <= 0xFF69) {
-            // [cgb] bg/obj palettes
-        } else if (addr <= 0xFF70) {
-            // [cgb] wram bank select
-        } else {
-            unknown();
-        }
-    }
-    else if (addr <= 0xFFFF)
-        (*hram)[addr - 0xFF80] = val;
-    else
-        interrupt_enabled = val;
-}
-
-bool GbE::half_carry_happened16(uint16_t val1, uint16_t val2) const
-{
-    return (((val1 & 0xFFF) + (val2 & 0xFFF)) & 0x1000) == 0x1000;
-}
-
-bool GbE::half_carry_happened8(uint8_t val1, uint8_t val2) const
-{
-    return (((val1 & 0xF) + (val2 & 0xF)) & 0x10) == 0x10;
-}
-
-bool GbE::carry_happened16(uint16_t val1, uint16_t val2) const
-{
-    return (0xFFFF - val1) < val2;
-}
-
-bool GbE::carry_happened8(uint8_t val1, uint8_t val2) const
-{
-    return (0xFF - val1) < val2;
-}
-
-uint8_t GbE::read_register8(Reg8 reg)
-{
-    if (reg == Reg8::_HL) {
-        // should it be the other way around?
-        uint16_t addr = read_register8(Reg8::L);
-        addr = addr | ((uint16_t) read_register8(Reg8::H) << 8);
-
-        return read_memory(addr);
-    }
-
-    return registers[(uint8_t) reg];
-}
-
-void GbE::write_register8(Reg8 reg, uint8_t val)
-{
-    if (reg == Reg8::_HL) {
-        uint16_t addr = read_register16(Reg16::HL);
-        write_memory(addr, val);
-
-        return;
-    }
-
-    registers[(uint8_t) reg] = val;
-}
-
-uint16_t GbE::read_register16(Reg16 reg) const
-{
-    uint8_t addr = ((uint8_t) reg) * 2;
-
-    return (registers[addr] << 8) | registers[addr+1];
-}
-
-void GbE::write_register16(Reg16 reg, uint16_t val)
-{
-    uint8_t addr = ((uint8_t) reg) * 2;
-
-    registers[addr] = (uint8_t) (val >> 8);
-    registers[addr+1] = (uint8_t) (val & 0xFF);
-}
-
-uint16_t GbE::read_register16(Reg16_SP reg) const
-{
-    if (reg == Reg16_SP::SP)
-        return SP;
-
-    uint8_t addr = ((uint8_t) reg) * 2;
-    return (registers[addr] << 8) | registers[addr+1];
-}
-
-void GbE::write_register16(Reg16_SP reg, uint16_t val)
-{
-    if (reg == Reg16_SP::SP) {
-        SP = val;
-        return;
-    }
-
-    uint8_t addr = ((uint8_t) reg) * 2;
-
-    registers[addr] = (uint8_t) (val >> 8);
-    registers[addr+1] = (uint8_t) (val & 0xFF);
-}
-
-uint8_t GbE::fetch()
-{
-    return read_memory(PC++);
-}
-
-int8_t GbE::fetch_signed()
-{
-    return (int8_t) read_memory(PC++);
-}
-
-uint16_t GbE::fetch16()
-{
-    uint16_t result = read_memory(PC++);
-    result = result | (read_memory(PC++) << 8);
-
-    return result;
-}
-
-int16_t GbE::fetch16_signed()
-{
-    int16_t result = read_memory(PC++);
-    result = result | (((int16_t) read_memory(PC++)) << 8);
-
-    return result;
-}
-
-void GbE::set_Z(bool val)
-{
-    // bit 7
-    if (val)
-        registers[6] = registers[6] | 0x80;
-    else
-        registers[6] = registers[6] & (0xFF ^ 0x80);
-}
-
-void GbE::set_N(bool val)
-{
-    // bit 6
-    if (val)
-        registers[6] = registers[6] | 0x40;
-    else
-        registers[6] = registers[6] & (0xFF ^ 0x40);
-}
-
-void GbE::set_H(bool val)
-{
-    // bit 5
-    if (val)
-        registers[6] = registers[6] | 0x20;
-    else
-        registers[6] = registers[6] & (0xFF ^ 0x20);
-}
-
-void GbE::set_C(bool val)
-{
-    // bit 4
-    if (val)
-        registers[6] = registers[6] | 0x10;
-    else
-        registers[6] = registers[6] & (0xFF ^ 0x10);
-}
-
-uint8_t GbE::get_Z() const
-{
-    return registers[6] >> 7;
-}
-
-uint8_t GbE::get_N() const
-{
-    return (registers[6] >> 6) & 1;
-}
-
-uint8_t GbE::get_H() const
-{
-    return (registers[6] >> 5) & 1;
-}
-
-uint8_t GbE::get_C() const
-{
-    return (registers[6] >> 4) & 1;
-}
 
 //===========Control==============
 void GbE::nop()

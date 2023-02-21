@@ -8,13 +8,11 @@ MemoryMapper::MemoryMapper()
 
 bool MemoryMapper::handle_rom0_write(uint16_t addr, uint8_t val)
 {
-    std::cout << "write to rom0 at " << std::hex << (unsigned int) addr;
     return true;
 }
 
 bool MemoryMapper::handle_romN_write(uint16_t addr, uint8_t val)
 {
-    std::cout << "write to rom0 at " << std::hex << (unsigned int) addr;
     return true;
 }
 
