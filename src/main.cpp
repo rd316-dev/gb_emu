@@ -33,7 +33,7 @@ bool testing_mode = true;
 
 int cycles_per_frame = 100000;
 
-GbE *emu;
+GbE::CPU *emu;
 
 uint8_t* load_file(const std::string &path, size_t *size)
 {
@@ -58,25 +58,25 @@ void debugger_main()
     ImGui::Begin("Registers");
     ImGui::Text("PC: %#04x\n ", emu->get_PC());
 
-    if (ImGui::BeginTable("GbAccess::Registers", 7)) {
+    if (ImGui::BeginTable("GbE::Registers", 7)) {
         ImGui::TableNextRow();
         char names[] = {'A', 'B', 'C', 'D', 'E', 'H', 'L'};
         for (char c : names) {
             ImGui::TableNextColumn();
             ImGui::Text("%c", c);
         }
-        GbAccess::Reg8 regs[] = {
-            GbAccess::Reg8::A,
-            GbAccess::Reg8::B,
-            GbAccess::Reg8::C,
-            GbAccess::Reg8::D,
-            GbAccess::Reg8::E,
-            GbAccess::Reg8::H,
-            GbAccess::Reg8::L
+        GbE::Reg8 regs[] = {
+            GbE::Reg8::A,
+            GbE::Reg8::B,
+            GbE::Reg8::C,
+            GbE::Reg8::D,
+            GbE::Reg8::E,
+            GbE::Reg8::H,
+            GbE::Reg8::L
         };
 
         ImGui::TableNextRow();
-        for (GbAccess::Reg8 r : regs) {
+        for (GbE::Reg8 r : regs) {
             ImGui::TableNextColumn();
             ImGui::Text("%02X", emu->read_register8(r));
         }
@@ -94,13 +94,13 @@ void debugger_main()
 
         ImGui::TableNextRow();
         ImGui::TableNextColumn();
-        ImGui::Text("%d", emu->get_flag(GbAccess::Flag::Z) ? 1 : 0);
+        ImGui::Text("%d", emu->get_flag(GbE::Flag::Z) ? 1 : 0);
         ImGui::TableNextColumn();
-        ImGui::Text("%d", emu->get_flag(GbAccess::Flag::N) ? 1 : 0);
+        ImGui::Text("%d", emu->get_flag(GbE::Flag::N) ? 1 : 0);
         ImGui::TableNextColumn();
-        ImGui::Text("%d", emu->get_flag(GbAccess::Flag::H) ? 1 : 0);
+        ImGui::Text("%d", emu->get_flag(GbE::Flag::H) ? 1 : 0);
         ImGui::TableNextColumn();
-        ImGui::Text("%d", emu->get_flag(GbAccess::Flag::C) ? 1 : 0);
+        ImGui::Text("%d", emu->get_flag(GbE::Flag::C) ? 1 : 0);
 
         ImGui::EndTable();
     }
@@ -219,7 +219,7 @@ int main()
     ImGui_ImplSDL2_InitForSDLRenderer(window, renderer);
     ImGui_ImplSDLRenderer_Init(renderer);
 
-    emu = new GbE();
+    emu = new GbE::CPU();
     start_unit_tests();
     emu->reset();
 

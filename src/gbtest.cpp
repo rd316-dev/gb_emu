@@ -2,7 +2,7 @@
 #include <iomanip>
 #include <iostream>
 
-GbTest::GbTest(GbE *emu)
+GbTest::GbTest(GbE::CPU *emu)
 {
     this->emu = emu;
 
@@ -43,8 +43,8 @@ void GbTest::test_loads_reg8_d8()
     uint8_t val = 0x22;
 
     for (int reg_num = 0; reg_num < 8; reg_num++) {
-        auto reg = (GbAccess::Reg8) reg_num;
-        if (reg == GbAccess::Reg8::_HL) {       // test ld (HL), d8 separately
+        auto reg = (GbE::Reg8) reg_num;
+        if (reg == GbE::Reg8::_HL) {       // test ld (HL), d8 separately
             continue;
         }
 
@@ -59,7 +59,7 @@ void GbTest::test_loads_reg8_d8()
     execute(0x2e, 0x00);
 
     // test both as a memory region and a register read
-    expect_reg(GbAccess::Reg8::_HL, 0xCD);
+    expect_reg(GbE::Reg8::_HL, 0xCD);
     expect_val_u8(0xC000, 0xCD);
     // write 0xCD to (HL) which is 0xC000
     execute(0x36, 0xCD);
@@ -68,11 +68,11 @@ void GbTest::test_loads_reg8_d8()
 void GbTest::test_loads_reg8_reg8()
 {
     for (int reg_src_num = 0; reg_src_num < 8; reg_src_num++) {
-        auto reg_src = (GbAccess::Reg8) reg_src_num;
+        auto reg_src = (GbE::Reg8) reg_src_num;
         uint8_t val = 0x32 + reg_src_num;
         uint8_t ld_reg8_d8_opcode = 0x6 | (reg_src_num << 3);
 
-        if (reg_src == GbAccess::Reg8::_HL) {
+        if (reg_src == GbE::Reg8::_HL) {
             continue;
         }
 
@@ -80,10 +80,10 @@ void GbTest::test_loads_reg8_reg8()
         execute(ld_reg8_d8_opcode, val);
 
         for (int reg_dest_num = 0; reg_dest_num < 8; reg_dest_num++) {
-            auto reg_dest = (GbAccess::Reg8) reg_dest_num;
+            auto reg_dest = (GbE::Reg8) reg_dest_num;
             uint8_t ld_reg8_reg8_opcode = (0x1 << 6) | (reg_dest_num << 3) | reg_src_num;
 
-            if (reg_dest == GbAccess::Reg8::_HL) {
+            if (reg_dest == GbE::Reg8::_HL) {
                 continue;
             }
 
@@ -96,14 +96,14 @@ void GbTest::test_loads_reg8_reg8()
 
 void GbTest::test_loads_reg8_hl()
 {
-    auto reg_src = GbAccess::Reg8::_HL;
+    auto reg_src = GbE::Reg8::_HL;
 
     uint8_t ld_hl_d8_opcode = 0x36;
     uint8_t val = 0x50;
 
     // write (HL) to all the registers
     for (int reg_dest_num = 0; reg_dest_num < 8; reg_dest_num++) {
-        auto reg_dest = (GbAccess::Reg8) reg_dest_num;
+        auto reg_dest = (GbE::Reg8) reg_dest_num;
         uint8_t ld_reg8_hl_opcode = (0x1 << 6) | (reg_dest_num << 3) | ((int) reg_src);
 
         if (ld_reg8_hl_opcode == 0x76) {
@@ -111,9 +111,9 @@ void GbTest::test_loads_reg8_hl()
         }
 
         // write address 0xc020 to HL
-        expect_reg(GbAccess::Reg8::H, 0xc0);
+        expect_reg(GbE::Reg8::H, 0xc0);
         execute(0x26, 0xc0); // write to H
-        expect_reg(GbAccess::Reg8::L, 0x20);
+        expect_reg(GbE::Reg8::L, 0x20);
         execute(0x2e, 0x20); // write to L
 
         // test both as a memory region and a register read
@@ -291,7 +291,7 @@ void GbTest::end_subtest_suit()
     std::cout << "SUBTEST SUIT END" << std::endl;
 }
 
-void GbTest::expect_flag(const GbAccess::Flag &flag, const bool &val)
+void GbTest::expect_flag(const GbE::Flag &flag, const bool &val)
 {
     exp_flag.push_back({flag, val});
 }
@@ -316,22 +316,22 @@ void GbTest::expect_val_s16(const uint16_t &addr, const int16_t &val)
     exp_val_s16.push_back({addr, val});
 }*/
 
-void GbTest::expect_reg(const GbAccess::Reg8 &reg, const uint8_t &val)
+void GbTest::expect_reg(const GbE::Reg8 &reg, const uint8_t &val)
 {
     exp_reg8.push_back({reg, val});
 }
 
-void GbTest::expect_reg(const GbAccess::Reg16 &reg, const uint16_t &val)
+void GbTest::expect_reg(const GbE::Reg16 &reg, const uint16_t &val)
 {
     exp_reg16.push_back({reg, val});
 }
 
-void GbTest::expect_reg(const GbAccess::Reg16_SP &reg, const uint16_t &val)
+void GbTest::expect_reg(const GbE::Reg16_SP &reg, const uint16_t &val)
 {
     exp_reg16_sp.push_back({reg, val});
 }
 
-/*void GbTest::expect_reg(const GbAccess::Reg16_Addr &reg, const uint16_t &val)
+/*void GbTest::expect_reg(const GbE::Reg16_Addr &reg, const uint16_t &val)
 {
     exp_reg16_addr.push_back({reg, val});
 }*/

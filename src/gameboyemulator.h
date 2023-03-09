@@ -9,16 +9,15 @@
 #include <memory>
 #include <functional>
 
-namespace GbAccess {
-    enum class Reg8 {B, C, D, E, H, L, _HL, A};
-    enum class Reg16 {BC=0, DE=1, HL=2, AF=3};
-    enum class Reg16_SP {BC=0, DE=1, HL=2, SP=3};
-    enum class Reg16_Addr {BC=0, DE=1, HLI=2, HLD=3};
+namespace GbE {
+enum class Reg8 {B, C, D, E, H, L, _HL, A};
+enum class Reg16 {BC=0, DE=1, HL=2, AF=3};
+enum class Reg16_SP {BC=0, DE=1, HL=2, SP=3};
+enum class Reg16_Addr {BC=0, DE=1, HLI=2, HLD=3};
 
-    enum class CF {Z, C}; // zero or carry
+enum class CF {Z, C}; // zero or carry
 
-    enum class Flag {Z, N, C, H};
-}
+enum class Flag {Z, N, C, H};
 
 // 80 bytes header
 struct CartidgeHeader {
@@ -48,11 +47,11 @@ struct LcdControl {
     bool priority;
 };
 
-class GbE
+class CPU
 {
 public:
-    GbE();
-    ~GbE();
+    CPU();
+    ~CPU();
 
     void reset();
     void execute_sequence(const std::vector<uint8_t> &bytes);
@@ -76,19 +75,19 @@ public:
     void     set_PC(const uint16_t &addr);
     uint16_t get_PC() const;
 
-    void     set_flag(const GbAccess::Flag &flag, const bool &val);
-    uint8_t  get_flag(const GbAccess::Flag &flag) const;
+    void     set_flag(const Flag &flag, const bool &val);
+    uint8_t  get_flag(const Flag &flag) const;
 
     uint8_t  read_memory(const uint16_t &addr);
 
-    uint8_t  read_register8(const GbAccess::Reg8 &reg);
-    uint16_t read_register16(const GbAccess::Reg16 &reg) const;
-    uint16_t read_register16(const GbAccess::Reg16_SP &reg) const;
+    uint8_t  read_register8(const Reg8 &reg);
+    uint16_t read_register16(const Reg16 &reg) const;
+    uint16_t read_register16(const Reg16_SP &reg) const;
 
     void write_memory(const uint16_t &addr, const uint8_t &val);
-    void write_register8(const GbAccess::Reg8 &reg, const uint8_t &val);
-    void write_register16(const GbAccess::Reg16 &reg, const uint16_t &val);
-    void write_register16(const GbAccess::Reg16_SP &reg, const uint16_t &val);
+    void write_register8(const Reg8 &reg, const uint8_t &val);
+    void write_register16(const Reg16 &reg, const uint16_t &val);
+    void write_register16(const Reg16_SP &reg, const uint16_t &val);
 
 protected:
     bool half_carry_happened16(const uint16_t &val1, const uint16_t &val2) const;
@@ -106,10 +105,10 @@ protected:
     void debug_push_arg(const std::string &arg);
 
     void debug_push_inst(const std::string &inst);
-    void debug_push_reg(const GbAccess::Reg8 &reg);
-    void debug_push_reg(const GbAccess::Reg16 &reg);
-    void debug_push_reg(const GbAccess::Reg16_SP &reg);
-    void debug_push_reg(const GbAccess::Reg16_Addr &reg);
+    void debug_push_reg(const Reg8 &reg);
+    void debug_push_reg(const Reg16 &reg);
+    void debug_push_reg(const Reg16_SP &reg);
+    void debug_push_reg(const Reg16_Addr &reg);
 
     void debug_push_addr16(const uint16_t  &addr);
     void debug_push_val_s8(const int8_t    &val);
@@ -117,8 +116,8 @@ protected:
     void debug_push_val_s16(const int16_t  &val);
     void debug_push_val_u16(const uint16_t &val);
 
-    void debug_push_flag(const GbAccess::CF &flag);
-    void debug_push_flag_n(const GbAccess::CF &flag);
+    void debug_push_flag(const CF &flag);
+    void debug_push_flag_n(const CF &flag);
     void debug_push_custom_arg(const std::string &arg);
     // debug functions for displaying current instruction
 
@@ -149,34 +148,34 @@ protected:
     void rra(const bool &carry);
 
     // prefixed by $CB
-    void rl_reg8(const GbAccess::Reg8 &reg, const bool &carry);
-    void rr_reg8(const GbAccess::Reg8 &reg, const bool &carry);
+    void rl_reg8(const Reg8 &reg, const bool &carry);
+    void rr_reg8(const Reg8 &reg, const bool &carry);
 
-    void sla_reg8(const GbAccess::Reg8 &reg);
-    void sra_reg8(const GbAccess::Reg8 &reg);
-    void srl_reg8(const GbAccess::Reg8 &reg);
+    void sla_reg8(const Reg8 &reg);
+    void sra_reg8(const Reg8 &reg);
+    void srl_reg8(const Reg8 &reg);
 
-    void swap_reg8(const GbAccess::Reg8 &reg);
-    void bit_reg8(const GbAccess::Reg8 &reg, const uint8_t &bit);
-    void res_reg8(const GbAccess::Reg8 &reg, const uint8_t &bit);
-    void set_reg8(const GbAccess::Reg8 &reg, const uint8_t &bit);
+    void swap_reg8(const Reg8 &reg);
+    void bit_reg8(const Reg8 &reg, const uint8_t &bit);
+    void res_reg8(const Reg8 &reg, const uint8_t &bit);
+    void set_reg8(const Reg8 &reg, const uint8_t &bit);
     //===========Bitwise==============
 
     //========16-bit loads============
-    void load_reg16_d16(const GbAccess::Reg16_SP &reg);
+    void load_reg16_d16(const Reg16_SP &reg);
     void load_HL_SP_s8();
     void load_SP_HL();
     void load_a16_SP();
 
-    void pop(const GbAccess::Reg16 &reg);
-    void push(const GbAccess::Reg16 &reg);
+    void pop(const Reg16 &reg);
+    void push(const Reg16 &reg);
     //========16-bit loads============
 
     //=========8-bit loads============
-    void load_reg8_d8(const GbAccess::Reg8 &reg);
-    void load_aReg16_A(const GbAccess::Reg16_Addr &reg);
-    void load_A_aReg16(const GbAccess::Reg16_Addr &reg);
-    void load_reg8_reg8(const GbAccess::Reg8 &reg1, const GbAccess::Reg8 &reg2);
+    void load_reg8_d8(const Reg8 &reg);
+    void load_aReg16_A(const Reg16_Addr &reg);
+    void load_A_aReg16(const Reg16_Addr &reg);
+    void load_reg8_reg8(const Reg8 &reg1, const Reg8 &reg2);
 
     void load_a8_A();
     void load_A_a8();
@@ -189,24 +188,24 @@ protected:
     //=========8-bit loads============
 
     //======16-bit arithmetic=========
-    void inc_reg16(const GbAccess::Reg16_SP &reg16);
-    void dec_reg16(const GbAccess::Reg16_SP &reg16);
-    void add_HL_reg16(const GbAccess::Reg16_SP &reg16);
+    void inc_reg16(const Reg16_SP &reg16);
+    void dec_reg16(const Reg16_SP &reg16);
+    void add_HL_reg16(const Reg16_SP &reg16);
     void add_SP_s8();
     //======16-bit arithmetic=========
 
     //=======8-bit arithmetic=========
-    void add_reg8(const GbAccess::Reg8 &reg);
-    void adc_reg8(const GbAccess::Reg8 &reg);
-    void sub_reg8(const GbAccess::Reg8 &reg);
-    void sbc_reg8(const GbAccess::Reg8 &reg);
-    void and_reg8(const GbAccess::Reg8 &reg);
-    void xor_reg8(const GbAccess::Reg8 &reg);
-    void or_reg8(const GbAccess::Reg8 &reg);
-    void cp_reg8(const GbAccess::Reg8 &reg);
+    void add_reg8(const Reg8 &reg);
+    void adc_reg8(const Reg8 &reg);
+    void sub_reg8(const Reg8 &reg);
+    void sbc_reg8(const Reg8 &reg);
+    void and_reg8(const Reg8 &reg);
+    void xor_reg8(const Reg8 &reg);
+    void or_reg8(const Reg8 &reg);
+    void cp_reg8(const Reg8 &reg);
 
-    void inc_reg8(const GbAccess::Reg8 &reg);
-    void dec_reg8(const GbAccess::Reg8 &reg);
+    void inc_reg8(const Reg8 &reg);
+    void dec_reg8(const Reg8 &reg);
 
     void add_d8();
     void adc_d8();
@@ -221,21 +220,21 @@ protected:
     //============Jumps===============
     // invoke if flag == val
     // relative jumps
-    void jr_F_s8(const GbAccess::CF &flag, const bool &val);
+    void jr_F_s8(const CF &flag, const bool &val);
     void jr_s8();
 
     // absolute jumps
-    void jp_F_a16(const GbAccess::CF &flag, const bool &val);
+    void jp_F_a16(const CF &flag, const bool &val);
     void jp_a16();
 
     void jp_HL();
 
     // calls
-    void call_F_a16(const GbAccess::CF &flag, const bool &val);
+    void call_F_a16(const CF &flag, const bool &val);
     void call_a16();
 
     // returns
-    void ret_F(const GbAccess::CF &flag, const bool &val);
+    void ret_F(const CF &flag, const bool &val);
 
     void ret();
     void reti();
@@ -257,6 +256,8 @@ private:
 
     uint16_t SP = 0;
     uint16_t PC = 0;
+
+    uint8_t div_incr_counter = 0;
 
     uint8_t div     = 0;
     uint8_t tima    = 0;
@@ -346,6 +347,7 @@ private:
     uint8_t* rom = nullptr;
 
     uint8_t* external_ram = nullptr;
+};
 };
 
 #endif // GAMEBOYEMULATOR_H
