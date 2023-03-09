@@ -10,6 +10,7 @@ file(GLOB IMGUI_SOURCES ${IMGUI_PATH}/**.cpp)
 add_executable(gb_emu
     src/main.cpp
     src/gameboyemulator.h src/gameboyemulator.cpp
+    src/gbtest.h src/gbtest.cpp
 
     src/imgui_impl_sdlrenderer.cpp
     src/imgui_impl_sdl.cpp
