@@ -60,6 +60,9 @@ public:
     void load_rom     (const size_t &size, uint8_t* rom);
     void execute();
 
+    uint8_t ppu_cycle();
+    void timer_cycle();
+
     uint16_t get_last_PC() const;
     uint8_t  get_last_opcode() const;
     uint8_t  get_last_CB_opcode() const;
@@ -123,7 +126,6 @@ protected:
 
     void start_dma(const uint8_t &src);
     void dma_cycle(const uint8_t &machine_cycles);
-    void ppu_cycle();
 
     //===========Control==============
     void nop();
@@ -291,6 +293,8 @@ private:
     int current_dot  = 0;
     int fetcher_step = 0;
 
+    uint16_t fetcher_addr = 0;
+
     bool stopped = false;
     bool halted  = false;
 
@@ -305,6 +309,8 @@ private:
 
     //uint8_t current_bank    = 0;
     //uint8_t secondary_bank  = 0;
+
+    bool enable_interrupts;
 
     uint64_t machine_cycle  = 0;
     int used_cycles         = 0;
