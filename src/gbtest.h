@@ -5,9 +5,9 @@
 #include <cstdint>
 #include <sstream>
 
-typedef struct Reg8_Exp       { GbE::Reg8       reg; uint8_t  val; } Reg8_Exp;
-typedef struct Reg16_Exp      { GbE::Reg16      reg; uint16_t val; } Reg16_Exp;
-typedef struct Reg16_SP_Exp   { GbE::Reg16_SP   reg; uint16_t val; } Reg16_SP_Exp;
+typedef struct Reg8_Exp     { GbE::Reg8     reg; uint8_t  val; } Reg8_Exp;
+typedef struct Reg16_Exp    { GbE::Reg16    reg; uint16_t val; } Reg16_Exp;
+typedef struct Reg16_SP_Exp { GbE::Reg16_SP reg; uint16_t val; } Reg16_SP_Exp;
 //typedef struct Reg16_Addr_Exp { GbE::Reg16_Addr reg; uint16_t val; } Reg16_Addr_Exp;
 
 typedef struct Val_u8_Exp  { uint16_t addr; uint8_t  val; } Val_u8_Exp;
@@ -16,6 +16,9 @@ typedef struct Val_s8_Exp  { uint16_t addr; int8_t   val; } Val_s8_Exp;
 //typedef struct Val_s16_Exp { uint16_t addr; int16_t  val; } Val_s16_Exp;
 
 typedef struct Flag_Exp { GbE::Flag flag; bool val; } Flag_Exp;
+
+typedef struct Context_u8 { std::string name; uint8_t val; } Context_u8;
+typedef struct Context_s8 { std::string name; int8_t  val; } Context_s8;
 
 class GbTest
 {
@@ -27,6 +30,7 @@ public:
     void test_loads_reg8_d8();
     void test_loads_reg8_reg8();
     void test_loads_reg8_hl();
+    void test_loads_aReg16_A();
     void test_loads_8bit_other();
 
     void test_loads_16bit();
@@ -41,6 +45,9 @@ public:
     void test_rotates();
     void test_interrupts();
     void test_cb();
+
+    void test_daa();
+
 protected:
     void check();
     void cleanup();
@@ -69,14 +76,20 @@ protected:
     void expect_reg(const GbE::Reg16_SP &reg, const uint16_t &val);
     //void expect_reg(const GbE::Reg16_Addr &reg, const uint16_t &val);
 
+    void add_context(const std::string name, const uint8_t &val);
+    void add_context(const std::string name, const int8_t  &val);
+
 private:
-    std::vector<Reg8_Exp>       exp_reg8;
-    std::vector<Reg16_Exp>      exp_reg16;
-    std::vector<Reg16_SP_Exp>   exp_reg16_sp;
+    std::vector<Context_u8> context_u8;
+    std::vector<Context_s8> context_s8;
+
+    std::vector<Reg8_Exp>     exp_reg8;
+    std::vector<Reg16_Exp>    exp_reg16;
+    std::vector<Reg16_SP_Exp> exp_reg16_sp;
     //std::vector<Reg16_Addr_Exp> exp_reg16_addr;
 
-    std::vector<Val_u8_Exp>  exp_val_u8;
-    std::vector<Val_s8_Exp>  exp_val_s8;
+    std::vector<Val_u8_Exp> exp_val_u8;
+    std::vector<Val_s8_Exp> exp_val_s8;
     //std::vector<Val_u16_Exp> exp_val_u16;
     //std::vector<Val_s16_Exp> exp_val_s16;
 
