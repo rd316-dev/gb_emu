@@ -4,6 +4,14 @@
 #include <string>
 #include <iomanip>
 
+#include "mbc1_mapper.h"
+
+#define DEBUG_PRINT_ENABLED
+
+#include "mbc1_mapper.h"
+
+#define DEBUG_PRINT_ENABLED
+
 void unimplemented(const std::string &name)
 {
     std::cout << name << " is unimplemented" << std::endl;
@@ -28,6 +36,12 @@ GbE::CPU::~CPU()
     free(wram);
     free(oam);
     free(hram);
+}
+
+void GbE::CPU::resume()
+{
+    stopped = false;
+    halted = false;
 }
 
 void GbE::CPU::reset()
@@ -81,93 +95,132 @@ std::string GbE::CPU::get_arg2() const
 
 void GbE::CPU::debug_push_inst(const std::string &inst)
 {
+    #ifdef DEBUG_PRINT_ENABLED
     debug_current_inst = inst;
     debug_arg1 = "";
     debug_arg2 = "";
+    #endif
 }
 
 void GbE::CPU::debug_push_arg(const std::string &arg)
 {
+    #ifdef DEBUG_PRINT_ENABLED
     if (debug_arg1.length() <= 0)
         debug_arg1 = arg;
     else
         debug_arg2 = arg;
+    #endif
 }
 
 void GbE::CPU::debug_push_reg(const GbE::Reg8 &reg)
 {
+    #ifdef DEBUG_PRINT_ENABLED
     const std::string arr[] = {"B", "C", "D", "E", "H", "L", "(HL)", "A"};
     debug_push_arg(arr[(int) reg]);
+    #endif
 }
 
 void GbE::CPU::debug_push_reg(const GbE::Reg16 &reg)
 {
+    #ifdef DEBUG_PRINT_ENABLED
     const std::string arr[] = {"BC", "DE", "HL", "AF"};
     debug_push_arg(arr[(int) reg]);
+    #endif
 }
 
 void GbE::CPU::debug_push_reg(const GbE::Reg16_SP &reg)
 {
+    #ifdef DEBUG_PRINT_ENABLED
     const std::string arr[] = {"BC", "DE", "HL", "SP"};
     debug_push_arg(arr[(int) reg]);
+    #endif
 }
 
 void GbE::CPU::debug_push_reg(const GbE::Reg16_Addr &reg)
 {
+    #ifdef DEBUG_PRINT_ENABLED
     const std::string arr[] = {"(BC)", "(DE)", "(HL+)", "(HL-)"};
     debug_push_arg(arr[(int) reg]);
+    #endif
+}
+
+void GbE::CPU::debug_push_addr8(const uint8_t &addr)
+{
+    #ifdef DEBUG_PRINT_ENABLED
+    std::stringstream stream;
+    stream << "(" << std::hex << std::setfill('0')
+           << std::setw(2) << (int) addr << std::dec << ")";
+
+    debug_push_arg(stream.str());
+    #endif
 }
 
 void GbE::CPU::debug_push_addr16(const uint16_t &addr)
 {
+    #ifdef DEBUG_PRINT_ENABLED
     std::stringstream stream;
     stream << "(" << std::hex << std::setfill('0')
            << std::setw(4) << (int) addr << std::dec << ")";
 
     debug_push_arg(stream.str());
+    #endif
 }
 
 void GbE::CPU::debug_push_val_s8(const int8_t &val)
 {
+    #ifdef DEBUG_PRINT_ENABLED
     debug_push_arg(std::to_string((int) val));
+    #endif
 }
 
 void GbE::CPU::debug_push_val_u8(const uint8_t &val)
 {
+    #ifdef DEBUG_PRINT_ENABLED
     std::stringstream stream;
     stream << std::hex << std::setfill('0') << std::setw(2)
            << (unsigned int) val << std::dec;
     debug_push_arg(stream.str());
+    #endif
 }
 
 void GbE::CPU::debug_push_val_s16(const int16_t &val)
 {
+    #ifdef DEBUG_PRINT_ENABLED
     debug_push_arg(std::to_string((int) val));
+    #endif
 }
 
 void GbE::CPU::debug_push_val_u16(const uint16_t &val)
 {
+    #ifdef DEBUG_PRINT_ENABLED
     std::stringstream stream;
     stream << std::hex << std::setfill('0') << std::setw(4)
            << (unsigned int) val << std::dec;
     debug_push_arg(stream.str());
+    #endif
 }
 
 void GbE::CPU::debug_push_flag(const GbE::CF &flag)
 {
+    #ifdef DEBUG_PRINT_ENABLED
     const std::string arr[] = {"Z", "C"};
     debug_push_arg(arr[(int) flag]);
+    #endif
 }
 
 void GbE::CPU::debug_push_flag_n(const GbE::CF &flag)
 {
+    #ifdef DEBUG_PRINT_ENABLED
     const std::string arr[] = {"NZ", "NC"};
     debug_push_arg(arr[(int) flag]);
+    #endif
 }
 
 void GbE::CPU::debug_push_custom_arg(const std::string &arg)
 {
+    #ifdef DEBUG_PRINT_ENABLED
     debug_push_arg(arg);
+    #endif
 }
 
 void GbE::CPU::load_boot_rom(const size_t &size, uint8_t* boot_rom)
@@ -215,10 +268,25 @@ void GbE::CPU::load_rom(const size_t &size, uint8_t* rom)
     memcpy(&(header.global_checksum),   rom + 0x14E, 2);
 
     std::cout << "ROM loaded. Size: " << size << std::endl;
+    std::cout << "Title: " << header.title << std::endl;
+
+    switch (header.cartridge_type) {
+        case 0x00: {
+            break;
+        } case 0x01: {
+            mapper = MBC1_Mapper(rom_size, header.ram_size);
+            break;
+        } default: {
+            std::cout << "Unsupported mapper: " << (unsigned int) header.cartridge_type << std::endl;
+        }
+    }
 }
 
 void GbE::CPU::execute()
 {
+    stopped = false;
+    halted = false;
+
     used_cycles = 0;
     last_PC = PC;
 
@@ -251,22 +319,40 @@ void GbE::CPU::execute()
 void GbE::CPU::timer_cycle()
 {
     // prevent the branching by using binary operations
-    ++div_incr_counter;
+    div_counter += used_cycles;
 
     uint8_t mask = 0x40;
-    uint8_t increment = (div_incr_counter & mask) >> 6;
+    uint8_t increment = (div_counter & mask) >> 6;
 
     // increment DIV if the counter is equal to 64
     div += increment;
-    // increment TIMA if the counter is equal to 64 and the timer is enabled
-    tima += increment & (tac >> 2);
 
     // reset the counter if it's equal to 64
-    div_incr_counter = div_incr_counter ^ mask;
+    div_counter = div_counter ^ mask;
 
-    if (tima == 0) [[unlikely]] {
-        tima = tma;
-        // trigger the interrupt
+    // increment TIMA if the counter is equal to 64 and the timer is enabled
+    if (tac & 0x04) [[unlikely]] {
+        timer_counter += used_cycles;
+        if (timer_counter >= timer_freq) {
+            tima++;
+            timer_counter = 0;
+
+            if (tima == 0) [[unlikely]] {
+                tima = tma;
+                // todo: trigger the interrupt
+            }
+        }
+    }
+}
+
+void GbE::CPU::execute_for(int memory_cycles)
+{
+    int total_cycles = 0;
+
+    while (total_cycles < memory_cycles) {
+        execute();
+
+        total_cycles += used_cycles;
     }
 }
 
@@ -353,10 +439,13 @@ void GbE::CPU::set_PC(const uint16_t &addr)
     PC = addr;
 }
 
-uint8_t GbE::CPU::read_memory(const uint16_t &addr)
+void GbE::CPU::set_PC(const uint16_t &addr)
 {
-    used_cycles++;
+    PC = addr;
+}
 
+uint8_t GbE::CPU::peek_memory(const uint16_t &addr) const
+{
     if (addr <= 0x00FF && boot_rom_mapped && boot_rom != nullptr) return boot_rom[addr];
     else if (addr <= 0x3FFF) return rom[mapper.convert_rom0_addr(addr)];
     else if (addr <= 0x7FFF) return rom[mapper.convert_romN_addr(addr)];
@@ -417,6 +506,13 @@ uint8_t GbE::CPU::read_memory(const uint16_t &addr)
     return 0xFF;
 }
 
+uint8_t GbE::CPU::read_memory(const uint16_t &addr)
+{
+    used_cycles++;
+
+    return peek_memory(addr);
+}
+
 void GbE::CPU::write_memory(const uint16_t &addr, const uint8_t &val)
 {
     used_cycles++;
@@ -434,31 +530,32 @@ void GbE::CPU::write_memory(const uint16_t &addr, const uint8_t &val)
     else if (addr <= 0xFE9F) oam[addr - 0xFE00] = val;
     else if (addr <= 0xFEFF) unknown();
     else if (addr <= 0xFF80) {
-        if (addr <= 0xFF00) {
+        if (addr == 0xFF00) {
             // joypad
-        } else if (addr <= 0xFF02) {
-            if (addr == 0xFF01) {
-                spi_byte = val;
-
-                std::cout << spi_byte;
-
-                if (spi_byte == '\n') {
-                    std::cout << std::endl;
-                }
-                          /*<< std::hex << std::setfill('0') << std::setw(4)
-                          << last_PC << std::dec << "\t"
-                          << debug_current_inst << "\t"
-                          << debug_arg1 << "\t"
-                          << debug_arg2 << std::endl;*/
-                if (debug_write_spi_to_buffer) {
-                    spi_buffer.push_back(val);
-                }
-            } else if (addr == 0xFF02) {
-                spi_started = val & 0x80;
-            }
+        } else if (addr == 0xFF01) {
             // serial transfer
-        } else if (addr <= 0xFF07) {
+            spi_byte = val;
+        } else if (addr == 0xFF02) {
+            if (val & 0x80) {
+                std::cout << std::dec << (char) spi_byte;
+                stopped = true;
+            }
+        } else if (addr == 0xFF04) {
             // timer and divider
+            div_counter = 0;
+            div = 0;
+        } else if (addr == 0xFF05) {
+            tima = val;
+            timer_counter = 0;
+        } else if (addr == 0xFF06) {
+            tma = val;
+        } else if (addr == 0xFF07) {
+            tac = val;
+
+            if (tac & 0x04) {
+                uint16_t freq[] = {1024, 16, 64, 256};
+                timer_freq = freq[val ^ 0x04];
+            }
         } else if (addr <= 0xFF26) {
             // audio
         } else if (addr <= 0xFF3F) {
@@ -696,24 +793,26 @@ int16_t GbE::CPU::fetch16_signed()
     return result;
 }
 
-void GbE::CPU::unknown() {}
+void GbE::CPU::unknown() const {}
 
 uint16_t GbE::CPU::pop16()
 {
-    uint16_t result = read_memory(read_register16(GbE::Reg16_SP::SP));
+    uint16_t sp = read_register16(GbE::Reg16_SP::SP);
+    uint16_t result = read_memory(sp);
 
-    result = result | ((uint16_t) read_memory(read_register16(GbE::Reg16_SP::SP) + 1) << 8);
-    write_register16(GbE::Reg16_SP::SP, read_register16(GbE::Reg16_SP::SP) + 2);
+    result = result | (((uint16_t) read_memory(sp + 1)) << 8);
+    write_register16(GbE::Reg16_SP::SP, sp + 2);
 
     return result;
 }
 
 void GbE::CPU::push16(const uint16_t &val)
 {
-    write_memory(read_register16(GbE::Reg16_SP::SP) - 1, (uint8_t) (val >> 8));
-    write_memory(read_register16(GbE::Reg16_SP::SP) - 2, (uint8_t) (val & 0xFF));
+    uint8_t sp = read_register16(GbE::Reg16_SP::SP);
+    write_memory(sp - 1, (uint8_t) (val >> 8));
+    write_memory(sp - 2, (uint8_t) (val & 0xFF));
 
-    write_register16(GbE::Reg16_SP::SP, read_register16(GbE::Reg16_SP::SP) - 2);
+    write_register16(GbE::Reg16_SP::SP, sp - 2);
 }
 
 void GbE::CPU::init_instruction_table()
@@ -1008,6 +1107,7 @@ void GbE::CPU::stop()
 {
     debug_push_inst("stop");
     stopped = true;
+    div = 0;
 }
 
 void GbE::CPU::halt()
@@ -1021,10 +1121,13 @@ void GbE::CPU::daa()
     debug_push_inst("daa");
 
     bool N_flag = get_flag(GbE::Flag::N);
+    bool N_flag = get_flag(GbE::Flag::N);
     bool C_flag = get_flag(GbE::Flag::C);
     bool H_flag = get_flag(GbE::Flag::H);
 
     uint8_t A = read_register8(GbE::Reg8::A);
+
+    std::cout << std::endl << "reg A: " << std::setw(2) << std::hex << A << std::dec << std::endl; 
 
     if (!N_flag) {
         if (C_flag || A > 0x99) {
@@ -1049,6 +1152,9 @@ void GbE::CPU::daa()
 
     set_flag(GbE::Flag::Z, A == 0);
     set_flag(GbE::Flag::H, 0);
+    set_flag(GbE::Flag::H, 0);
+
+    stopped = true;
 }
 
 void GbE::CPU::scf()
@@ -1089,9 +1195,7 @@ void GbE::CPU::ei()
 
 void GbE::CPU::cb()
 {
-    debug_push_inst("cb");
     uint8_t inst = fetch();
-    debug_push_val_u8(inst);
 
     cbtab[inst]();
 
@@ -1109,8 +1213,22 @@ void GbE::CPU::rla(const bool &carry)
         debug_push_inst("rlca");
     }
 
-    rl_reg8(GbE::Reg8::A, carry);
+    uint8_t data = read_register8(Reg8::A);
+    uint8_t bit0;
+    if (carry) {
+        bit0 = get_flag(GbE::Flag::C);
+    } else {
+        bit0 = data >> 7;
+        set_flag(GbE::Flag::C, bit0);
+    }
+
+    data = (data << 1) | bit0;
+
     set_flag(GbE::Flag::Z, 0);
+    set_flag(GbE::Flag::N, 0);
+    set_flag(GbE::Flag::H, 0);
+
+    write_register8(Reg8::A, data);
 }
 
 void GbE::CPU::rra(const bool &carry)
@@ -1121,13 +1239,35 @@ void GbE::CPU::rra(const bool &carry)
         debug_push_inst("rrca");
     }
 
-    rr_reg8(GbE::Reg8::A, carry);
+    uint8_t data = read_register8(Reg8::A);
+    uint8_t bit7;
+    if (carry) {
+        bit7 = get_flag(GbE::Flag::C);
+    } else {
+        bit7 = data << 7;
+    }
+
+    data = (data >> 1) | bit7;
+
     set_flag(GbE::Flag::Z, 0);
+    set_flag(GbE::Flag::N, 0);
+    set_flag(GbE::Flag::H, 0);
+    set_flag(GbE::Flag::C, bit7);
+
+    write_register8(Reg8::A, data);
 }
 
 // prefixed by $CB
 void GbE::CPU::rl_reg8(const GbE::Reg8 &reg, const bool &carry)
 {
+    if (carry) {
+        debug_push_inst("rl");
+    } else {
+        debug_push_inst("rlc");
+    }
+
+    debug_push_reg(reg);
+
     uint8_t data = read_register8(reg);
     uint8_t bit0;
     if (carry) {
@@ -1148,6 +1288,14 @@ void GbE::CPU::rl_reg8(const GbE::Reg8 &reg, const bool &carry)
 
 void GbE::CPU::rr_reg8(const GbE::Reg8 &reg, const bool &carry)
 {
+    if (carry) {
+        debug_push_inst("rr");
+    } else {
+        debug_push_inst("rrc");
+    }
+
+    debug_push_reg(reg);
+
     uint8_t data = read_register8(reg);
     uint8_t bit7;
     if (carry) {
@@ -1168,6 +1316,9 @@ void GbE::CPU::rr_reg8(const GbE::Reg8 &reg, const bool &carry)
 
 void GbE::CPU::sla_reg8(const GbE::Reg8 &reg)
 {
+    debug_push_inst("sla");
+
+    debug_push_reg(reg);
     uint8_t data = read_register8(reg);
 
     set_flag(GbE::Flag::Z, data == 0);
@@ -1180,6 +1331,10 @@ void GbE::CPU::sla_reg8(const GbE::Reg8 &reg)
 
 void GbE::CPU::sra_reg8(const GbE::Reg8 &reg)
 {
+    debug_push_inst("sra");
+
+    debug_push_reg(reg);
+
     uint8_t data = read_register8(reg);
     uint8_t bit7 = (data >> 7) << 7;
 
@@ -1193,6 +1348,9 @@ void GbE::CPU::sra_reg8(const GbE::Reg8 &reg)
 
 void GbE::CPU::srl_reg8(const GbE::Reg8 &reg)
 {
+    debug_push_inst("srl");
+
+    debug_push_reg(reg);
     uint8_t data = read_register8(reg);
     set_flag(GbE::Flag::C, data & 1);
     data = data >> 1;
@@ -1205,6 +1363,9 @@ void GbE::CPU::srl_reg8(const GbE::Reg8 &reg)
 }
 
 void GbE::CPU::swap_reg8(const GbE::Reg8 &reg) {
+    debug_push_inst("swap");
+
+    debug_push_reg(reg);
     uint8_t data = read_register8(reg);
 
     uint8_t high = data << 4;
@@ -1221,6 +1382,10 @@ void GbE::CPU::swap_reg8(const GbE::Reg8 &reg) {
 }
 
 void GbE::CPU::bit_reg8(const GbE::Reg8 &reg, const uint8_t &bit) {
+    debug_push_inst("bit");
+
+    debug_push_arg(std::to_string(bit));
+    debug_push_reg(reg);
     uint8_t data = read_register8(reg);
 
     uint8_t bitData = (data << (7 - bit)) >> 7;
@@ -1231,6 +1396,10 @@ void GbE::CPU::bit_reg8(const GbE::Reg8 &reg, const uint8_t &bit) {
 }
 
 void GbE::CPU::res_reg8(const GbE::Reg8 &reg, const uint8_t &bit) {
+    debug_push_inst("res");
+
+    debug_push_arg(std::to_string(bit));
+    debug_push_reg(reg);
     uint8_t data = read_register8(reg);
     data = data & ~(1 << bit);
 
@@ -1239,6 +1408,10 @@ void GbE::CPU::res_reg8(const GbE::Reg8 &reg, const uint8_t &bit) {
 
 void GbE::CPU::set_reg8(const GbE::Reg8 &reg, const uint8_t &bit)
 {
+    debug_push_inst("set");
+
+    debug_push_arg(std::to_string(bit));
+    debug_push_reg(reg);
     uint8_t data = read_register8(reg);
     data = data | 1 << bit;
 
@@ -1382,7 +1555,7 @@ void GbE::CPU::load_a8_A()
     debug_push_inst("ld");
 
     uint8_t val = fetch();
-    debug_push_custom_arg("(" + std::to_string((unsigned int) val) + ")");
+    debug_push_addr8(val);
     debug_push_reg(GbE::Reg8::A);
 
     uint16_t addr = 0xFF00 + val;
@@ -1395,7 +1568,7 @@ void GbE::CPU::load_A_a8()
 
     uint8_t val = fetch();
     debug_push_reg(GbE::Reg8::A);
-    debug_push_custom_arg("(" + std::to_string((unsigned int) val) + ")");
+    debug_push_addr8(val);
 
     uint16_t addr = 0xFF00 + val;
     write_register8(GbE::Reg8::A, read_memory(addr));
@@ -1861,6 +2034,10 @@ void GbE::CPU::jr_s8()
     debug_push_val_s8(val);
 
     PC += val;
+
+    if (val == -2) [[unlikely]] {
+        stopped = true;
+    }
 }
 
 // absolute jumps

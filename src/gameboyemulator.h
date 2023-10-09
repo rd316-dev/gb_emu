@@ -53,6 +53,7 @@ public:
     CPU();
     ~CPU();
 
+    void resume();
     void reset();
     void execute_sequence(const std::vector<uint8_t> &bytes);
 
@@ -62,6 +63,7 @@ public:
 
     uint8_t ppu_cycle();
     void timer_cycle();
+    void execute_for(int machine_cycles);
 
     uint16_t get_last_PC() const;
     uint8_t  get_last_opcode() const;
@@ -78,10 +80,11 @@ public:
     void     set_PC(const uint16_t &addr);
     uint16_t get_PC() const;
 
-    void     set_flag(const Flag &flag, const bool &val);
-    uint8_t  get_flag(const Flag &flag) const;
+    void    set_flag(const Flag &flag, const bool &val);
+    uint8_t get_flag(const Flag &flag) const;
 
-    uint8_t  read_memory(const uint16_t &addr);
+    uint8_t read_memory(const uint16_t &addr);
+    uint8_t peek_memory(const uint16_t &addr) const;
 
     uint8_t  read_register8(const Reg8 &reg);
     uint16_t read_register16(const Reg16 &reg) const;
@@ -102,7 +105,7 @@ protected:
     void init_instruction_table();
     void init_cb_instruction_table();
 
-    void unknown();
+    void unknown() const;
 
     // debug functions for displaying current instruction
     void debug_push_arg(const std::string &arg);
@@ -113,6 +116,7 @@ protected:
     void debug_push_reg(const Reg16_SP &reg);
     void debug_push_reg(const Reg16_Addr &reg);
 
+    void debug_push_addr8(const  uint8_t   &addr);
     void debug_push_addr16(const uint16_t  &addr);
     void debug_push_val_s8(const int8_t    &val);
     void debug_push_val_u8(const uint8_t   &val);
@@ -259,7 +263,10 @@ private:
     uint16_t SP = 0;
     uint16_t PC = 0;
 
-    uint8_t div_incr_counter = 0;
+    uint8_t div_counter = 0;
+
+    uint16_t timer_counter = 0;
+    uint8_t timer_freq = 0;
 
     uint8_t div     = 0;
     uint8_t tima    = 0;
@@ -326,9 +333,11 @@ private:
     bool debug_inst_output_enabled = false;
 
     bool debug_write_spi_to_buffer = false;
-    bool spi_started = false;
+    uint8_t spi_control = 0;
     uint8_t spi_byte = 0;
     std::vector<uint8_t> spi_buffer;
+
+    uint8_t spi_clock = 0;
 
     std::string debug_current_inst;
     std::string debug_arg1;
