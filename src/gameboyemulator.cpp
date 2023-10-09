@@ -4,7 +4,7 @@
 #include <string>
 #include <iomanip>
 
-void unimplemented(std::string name)
+void unimplemented(const std::string &name)
 {
     std::cout << name << " is unimplemented" << std::endl;
 }
@@ -240,6 +240,16 @@ void GbE::CPU::execute()
         }
     }
 
+    if (enable_interrupts) {
+        enable_interrupts = false;
+        interrupt_enabled = 0x0F;
+    }
+
+    timer_cycle();
+}
+
+void GbE::CPU::timer_cycle()
+{
     // prevent the branching by using binary operations
     ++div_incr_counter;
 
@@ -260,12 +270,7 @@ void GbE::CPU::execute()
     }
 }
 
-void GbE::CPU::set_PC(const uint16_t &addr)
-{
-    PC = addr;
-}
-
-void GbE::CPU::ppu_cycle()
+uint8_t GbE::CPU::ppu_cycle()
 {
     int current_scanline = current_dot / 456;
     int scanline_dot = current_dot % 456;
@@ -279,20 +284,38 @@ void GbE::CPU::ppu_cycle()
             bool inside_window_x = (fetcher_x * 8) >= wx && lcdc.window_enabled;
             bool inside_window_y = (fetcher_y * 8) >= wy && lcdc.window_enabled;
 
-            uint16_t addr = 0x9800;
+            fetcher_addr = 0x9800;
 
-            if ((inside_window_x && lcdc.window_tile_map_area) || (!inside_window_x && lcdc.bg_tile_map_area))
-                addr = 0x9C00;
+            if (inside_window_x && lcdc.window_tile_map_area)
+                fetcher_addr = 0x9C00;
+
+            if (!inside_window_x && lcdc.bg_tile_map_area)
+                fetcher_addr = 0x9C00;
+
+            int x = 0;
 
             if (inside_window_x && inside_window_y) {
                 // todo: I don't understand
+                // x =
             } else {
-                int x = ((scx / 8) + fetcher_x) & 0x1F;
+                x = ((scx / 8) + fetcher_x) & 0x1F;
             }
+
+            return 2;
         } else if (fetcher_step == 1) {
+            uint8_t data_low = read_memory(fetcher_addr);
 
+            return 2;
         } else if (fetcher_step == 2) {
+            uint8_t data_high = read_memory(fetcher_addr + 1);
 
+            return 2;
+        } else if (fetcher_step == 3) {
+
+            return 2;
+        } else if (fetcher_step == 4) {
+
+            return 1;
         }
     } else {
         // vblank
@@ -323,6 +346,11 @@ void GbE::CPU::start_dma(const uint8_t &src)
     dma_src_addr = src << 8;
     dma_dest_addr = 0xFE00;
     dma_started = true;
+}
+
+void GbE::CPU::set_PC(const uint16_t &addr)
+{
+    PC = addr;
 }
 
 uint8_t GbE::CPU::read_memory(const uint16_t &addr)
@@ -655,7 +683,7 @@ int8_t GbE::CPU::fetch_signed()
 uint16_t GbE::CPU::fetch16()
 {
     uint16_t result = read_memory(PC++);
-    result = result | (read_memory(PC++) << 8);
+    result = result | (((uint16_t) read_memory(PC++)) << 8);
 
     return result;
 }
@@ -787,8 +815,6 @@ void GbE::CPU::init_instruction_table()
                         inst = [this, p] { rra(p & 1); };
                     else
                         inst = [this, p] { rla(p & 1); };
-                } else {
-
                 }
             }
 
@@ -994,7 +1020,7 @@ void GbE::CPU::daa()
 {
     debug_push_inst("daa");
 
-    /*bool N_flag = get_flag(GbE::Flag::N);
+    bool N_flag = get_flag(GbE::Flag::N);
     bool C_flag = get_flag(GbE::Flag::C);
     bool H_flag = get_flag(GbE::Flag::H);
 
@@ -1022,7 +1048,7 @@ void GbE::CPU::daa()
     write_register8(GbE::Reg8::A, A);
 
     set_flag(GbE::Flag::Z, A == 0);
-    set_flag(GbE::Flag::H, 0);*/
+    set_flag(GbE::Flag::H, 0);
 }
 
 void GbE::CPU::scf()
@@ -1058,7 +1084,7 @@ void GbE::CPU::di()
 void GbE::CPU::ei()
 {
     debug_push_inst("ei");
-    interrupt_enabled = 0x01;
+    enable_interrupts = true;
 }
 
 void GbE::CPU::cb()
