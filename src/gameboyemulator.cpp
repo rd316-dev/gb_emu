@@ -5,10 +5,7 @@
 #include <iomanip>
 
 #include "mbc1_mapper.h"
-
-#define DEBUG_PRINT_ENABLED
-
-#include "mbc1_mapper.h"
+#include "utils.h"
 
 #define DEBUG_PRINT_ENABLED
 
@@ -31,6 +28,7 @@ GbE::CPU::CPU()
 
     vram = (uint8_t*) malloc(0x2000);
     wram = (uint8_t*) malloc(0x2000);
+    external_ram = (uint8_t*) malloc(0x2000);
     oam  = (uint8_t*) malloc(0xA0);
     hram = (uint8_t*) malloc(0x7F);
 }
@@ -39,6 +37,7 @@ GbE::CPU::~CPU()
 {
     free(vram);
     free(wram);
+    free(external_ram);
     free(oam);
     free(hram);
 }
@@ -260,8 +259,6 @@ void GbE::CPU::load_boot_rom(const size_t &size, uint8_t* boot_rom)
     this->boot_rom = boot_rom;
     this->boot_rom_mapped = true;
     this->PC = 0;
-
-    std::cout << std::dec;
 
     std::cout << "Boot ROM loaded. Size: " << size << std::endl;
 }
