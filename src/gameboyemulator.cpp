@@ -17,6 +17,11 @@ void unimplemented(const std::string &name)
     std::cout << name << " is unimplemented" << std::endl;
 }
 
+uint8_t GbE::flag_mask(Flag flag, bool val)
+{
+    return val << (7 - (uint8_t) flag);
+}
+
 GbE::CPU::CPU()
 {
     init_instruction_table();
@@ -36,6 +41,28 @@ GbE::CPU::~CPU()
     free(wram);
     free(oam);
     free(hram);
+}
+
+void GbE::CPU::init(const State &data)
+{
+    PC = data.PC;
+    SP = data.SP;
+
+    write_register8(Reg8::A, data.A);
+    write_register8(Reg8::B, data.B);
+    write_register8(Reg8::C, data.C);
+    write_register8(Reg8::D, data.D);
+    write_register8(Reg8::E, data.E);
+    write_register8(Reg8::H, data.H);
+    write_register8(Reg8::L, data.L);
+    set_flag(Flag::Z, data.fZ);
+    set_flag(Flag::N, data.fN);
+    set_flag(Flag::C, data.fC);
+    set_flag(Flag::H, data.fH);
+
+    for (const auto &m : data.mem_delta) {
+        write_memory(m.addr, m.val);
+    }
 }
 
 void GbE::CPU::resume()
@@ -112,7 +139,7 @@ void GbE::CPU::debug_push_arg(const std::string &arg)
     #endif
 }
 
-void GbE::CPU::debug_push_reg(const GbE::Reg8 &reg)
+void GbE::CPU::debug_push_reg(const GbE::Reg8 reg)
 {
     #ifdef DEBUG_PRINT_ENABLED
     const std::string arr[] = {"B", "C", "D", "E", "H", "L", "(HL)", "A"};
@@ -120,7 +147,7 @@ void GbE::CPU::debug_push_reg(const GbE::Reg8 &reg)
     #endif
 }
 
-void GbE::CPU::debug_push_reg(const GbE::Reg16 &reg)
+void GbE::CPU::debug_push_reg(const GbE::Reg16 reg)
 {
     #ifdef DEBUG_PRINT_ENABLED
     const std::string arr[] = {"BC", "DE", "HL", "AF"};
@@ -128,7 +155,7 @@ void GbE::CPU::debug_push_reg(const GbE::Reg16 &reg)
     #endif
 }
 
-void GbE::CPU::debug_push_reg(const GbE::Reg16_SP &reg)
+void GbE::CPU::debug_push_reg(const GbE::Reg16_SP reg)
 {
     #ifdef DEBUG_PRINT_ENABLED
     const std::string arr[] = {"BC", "DE", "HL", "SP"};
@@ -136,7 +163,7 @@ void GbE::CPU::debug_push_reg(const GbE::Reg16_SP &reg)
     #endif
 }
 
-void GbE::CPU::debug_push_reg(const GbE::Reg16_Addr &reg)
+void GbE::CPU::debug_push_reg(const GbE::Reg16_Addr reg)
 {
     #ifdef DEBUG_PRINT_ENABLED
     const std::string arr[] = {"(BC)", "(DE)", "(HL+)", "(HL-)"};
@@ -144,7 +171,7 @@ void GbE::CPU::debug_push_reg(const GbE::Reg16_Addr &reg)
     #endif
 }
 
-void GbE::CPU::debug_push_addr8(const uint8_t &addr)
+void GbE::CPU::debug_push_addr8(const uint8_t addr)
 {
     #ifdef DEBUG_PRINT_ENABLED
     std::stringstream stream;
@@ -155,7 +182,7 @@ void GbE::CPU::debug_push_addr8(const uint8_t &addr)
     #endif
 }
 
-void GbE::CPU::debug_push_addr16(const uint16_t &addr)
+void GbE::CPU::debug_push_addr16(const uint16_t addr)
 {
     #ifdef DEBUG_PRINT_ENABLED
     std::stringstream stream;
@@ -166,14 +193,14 @@ void GbE::CPU::debug_push_addr16(const uint16_t &addr)
     #endif
 }
 
-void GbE::CPU::debug_push_val_s8(const int8_t &val)
+void GbE::CPU::debug_push_val_s8(const int8_t val)
 {
     #ifdef DEBUG_PRINT_ENABLED
     debug_push_arg(std::to_string((int) val));
     #endif
 }
 
-void GbE::CPU::debug_push_val_u8(const uint8_t &val)
+void GbE::CPU::debug_push_val_u8(const uint8_t val)
 {
     #ifdef DEBUG_PRINT_ENABLED
     std::stringstream stream;
@@ -183,14 +210,14 @@ void GbE::CPU::debug_push_val_u8(const uint8_t &val)
     #endif
 }
 
-void GbE::CPU::debug_push_val_s16(const int16_t &val)
+void GbE::CPU::debug_push_val_s16(const int16_t val)
 {
     #ifdef DEBUG_PRINT_ENABLED
     debug_push_arg(std::to_string((int) val));
     #endif
 }
 
-void GbE::CPU::debug_push_val_u16(const uint16_t &val)
+void GbE::CPU::debug_push_val_u16(const uint16_t val)
 {
     #ifdef DEBUG_PRINT_ENABLED
     std::stringstream stream;
@@ -200,7 +227,7 @@ void GbE::CPU::debug_push_val_u16(const uint16_t &val)
     #endif
 }
 
-void GbE::CPU::debug_push_flag(const GbE::CF &flag)
+void GbE::CPU::debug_push_flag(const GbE::CF flag)
 {
     #ifdef DEBUG_PRINT_ENABLED
     const std::string arr[] = {"Z", "C"};
@@ -208,7 +235,7 @@ void GbE::CPU::debug_push_flag(const GbE::CF &flag)
     #endif
 }
 
-void GbE::CPU::debug_push_flag_n(const GbE::CF &flag)
+void GbE::CPU::debug_push_flag_n(const GbE::CF flag)
 {
     #ifdef DEBUG_PRINT_ENABLED
     const std::string arr[] = {"NZ", "NC"};
@@ -303,8 +330,10 @@ void GbE::CPU::execute()
     }
 
     if (lcdc.lcd_ppu_enabled) [[likely]] {
-        for (int i = 0; i < (used << 2); i++) {
-            ppu_cycle();
+        for (int i = 0; i < (used << 2);) {
+            int ret = ppu_cycle();
+            current_dot += ret;
+            i += ret;
         }
     }
 
@@ -361,6 +390,10 @@ uint8_t GbE::CPU::ppu_cycle()
     int current_scanline = current_dot / 456;
     int scanline_dot = current_dot % 456;
 
+    LY = current_scanline;
+
+    STAT = STAT | ((LY == LYC) << 2);
+
     if (current_scanline <= 143) {
         if (scanline_dot <= 80) {
             // oam scan
@@ -404,11 +437,9 @@ uint8_t GbE::CPU::ppu_cycle()
             return 1;
         }
     } else {
+        return 1;
         // vblank
     }
-
-    LY = current_scanline;
-    current_dot++;
 }
 
 void GbE::CPU::dma_cycle(const uint8_t &machine_cycles)
@@ -434,17 +465,7 @@ void GbE::CPU::start_dma(const uint8_t &src)
     dma_started = true;
 }
 
-void GbE::CPU::set_PC(const uint16_t &addr)
-{
-    PC = addr;
-}
-
-void GbE::CPU::set_PC(const uint16_t &addr)
-{
-    PC = addr;
-}
-
-uint8_t GbE::CPU::peek_memory(const uint16_t &addr) const
+uint8_t GbE::CPU::peek_memory(const uint16_t addr) const
 {
     if (addr <= 0x00FF && boot_rom_mapped && boot_rom != nullptr) return boot_rom[addr];
     else if (addr <= 0x3FFF) return rom[mapper.convert_rom0_addr(addr)];
@@ -474,7 +495,9 @@ uint8_t GbE::CPU::peek_memory(const uint16_t &addr) const
         } else if (addr <= 0xFF3F) {
             // wave pattern
         } else if (addr <= 0xFF4B) {
-            if (addr == 0xFF42) {
+            if (addr == 0xFF41) {
+                return STAT;
+            } else if (addr == 0xFF42) {
                 // scy
             } else if (addr == 0xFF43) {
                 // scx
@@ -506,14 +529,14 @@ uint8_t GbE::CPU::peek_memory(const uint16_t &addr) const
     return 0xFF;
 }
 
-uint8_t GbE::CPU::read_memory(const uint16_t &addr)
+uint8_t GbE::CPU::read_memory(const uint16_t addr)
 {
     used_cycles++;
 
     return peek_memory(addr);
 }
 
-void GbE::CPU::write_memory(const uint16_t &addr, const uint8_t &val)
+void GbE::CPU::write_memory(const uint16_t addr, const uint8_t val)
 {
     used_cycles++;
 
@@ -529,7 +552,7 @@ void GbE::CPU::write_memory(const uint16_t &addr, const uint8_t &val)
     else if (addr <= 0xFDFF) wram[addr - 0xE000] = val;
     else if (addr <= 0xFE9F) oam[addr - 0xFE00] = val;
     else if (addr <= 0xFEFF) unknown();
-    else if (addr <= 0xFF80) {
+    else if (addr <= 0xFF7F) {
         if (addr == 0xFF00) {
             // joypad
         } else if (addr == 0xFF01) {
@@ -537,8 +560,8 @@ void GbE::CPU::write_memory(const uint16_t &addr, const uint8_t &val)
             spi_byte = val;
         } else if (addr == 0xFF02) {
             if (val & 0x80) {
-                std::cout << std::dec << (char) spi_byte;
-                stopped = true;
+                std::cout << (char) spi_byte;
+                spi_buffer.push_back(spi_byte);
             }
         } else if (addr == 0xFF04) {
             // timer and divider
@@ -656,59 +679,75 @@ uint16_t GbE::CPU::get_PC() const
     return PC;
 }
 
-uint8_t GbE::CPU::get_flag(const GbE::Flag &flag) const
+void GbE::CPU::set_PC(const uint16_t addr)
+{
+    PC = addr;
+}
+
+uint16_t GbE::CPU::get_SP() const
+{
+    return SP;
+}
+
+uint8_t GbE::CPU::get_flag(const GbE::Flag flag) const
+{
+    uint8_t flag_num = (uint8_t) flag;
+    uint8_t mask = flag_mask(flag);
+
+    return (registers[6] & mask) > 0;
+}
+
+void GbE::CPU::set_flag(const GbE::Flag flag, const bool val)
 {
     uint8_t flag_num = (uint8_t) flag;
 
-    return (registers[6] >> (7 - flag_num)) & 1;
+    uint8_t mask = flag_mask(flag);
+    uint8_t val_mask = flag_mask(flag, val);
+
+    registers[6] = (registers[6] & ~mask) ^ val_mask;
 }
 
-void GbE::CPU::set_flag(const GbE::Flag &flag, const bool &val)
+bool GbE::CPU::half_carry16(const uint16_t val1, const uint16_t val2) const
 {
-    uint8_t flag_num = (uint8_t) flag;
-
-    uint8_t mask = 0x80 >> flag_num;
-
-    if (val)
-        registers[6] = registers[6] | mask;
-    else
-        registers[6] = registers[6] & (0xFF ^ mask);
+    return ((val1 & 0xFFF) + (val2 & 0xFFF)) > 0x0FFF;
 }
 
-bool GbE::CPU::half_carry_happened16(const uint16_t &val1, const uint16_t &val2) const
+bool GbE::CPU::half_carry8(const uint8_t val1, const uint8_t val2) const
 {
-    return (((val1 & 0xFFF) + (val2 & 0xFFF)) & 0x1000) == 0x1000;
+    return ((val1 & 0xF) + (val2 & 0xF)) > 0x0F;
 }
 
-bool GbE::CPU::half_carry_happened8(const uint8_t &val1, const uint8_t &val2) const
+bool GbE::CPU::half_carry_sub8(const uint8_t val1, const uint8_t val2) const
 {
-    return (((val1 & 0xF) + (val2 & 0xF)) & 0x10) == 0x10;
+    return ((val1 & 0xF) - (val2 & 0xF)) > 0x0F;
 }
 
-bool GbE::CPU::carry_happened16(const uint16_t &val1, const uint16_t &val2) const
+bool GbE::CPU::carry16(const uint16_t val1, const uint16_t val2) const
 {
-    return (0xFFFF - val1) < val2;
+    return (((uint32_t) val1) + val2) > 0xFFFF;
 }
 
-bool GbE::CPU::carry_happened8(const uint8_t &val1, const uint8_t &val2) const
+bool GbE::CPU::carry8(const uint8_t val1, const uint8_t val2) const
 {
-    return (0xFF - val1) < val2;
+    return (((uint16_t) val1) + val2) > 0xFF;
 }
 
-uint8_t GbE::CPU::read_register8(const GbE::Reg8 &reg)
+bool GbE::CPU::carry_sub8(const uint8_t val1, const uint8_t val2) const
+{
+    return val2 > val1;
+}
+
+uint8_t GbE::CPU::read_register8(const GbE::Reg8 reg)
 {
     if (reg == GbE::Reg8::_HL) {
-        uint8_t L = read_register8(GbE::Reg8::L);
-        uint8_t H = read_register8(GbE::Reg8::H);
-        uint16_t addr = L | (((uint16_t) H) << 8);
-
+        uint16_t addr = read_register16(GbE::Reg16::HL);
         return read_memory(addr);
     }
 
     return registers[(uint8_t) reg];
 }
 
-void GbE::CPU::write_register8(const GbE::Reg8 &reg, const uint8_t &val)
+void GbE::CPU::write_register8(const GbE::Reg8 reg, const uint8_t val)
 {
     if (reg == GbE::Reg8::_HL) {
         uint16_t addr = read_register16(GbE::Reg16::HL);
@@ -720,18 +759,18 @@ void GbE::CPU::write_register8(const GbE::Reg8 &reg, const uint8_t &val)
     registers[(uint8_t) reg] = val;
 }
 
-uint16_t GbE::CPU::read_register16(const GbE::Reg16 &reg) const
+uint16_t GbE::CPU::read_register16(const GbE::Reg16 reg) const
 {
     if (reg == GbE::Reg16::AF) {
-        return registers[7] << 8 | registers[6];
+        return ((uint16_t) (registers[7] << 8)) | (registers[6] & 0xF0);
     }
 
-    uint8_t addr = ((uint8_t) reg) * 2;
+    uint8_t addr = ((uint8_t) reg) << 1;
 
-    return (registers[addr] << 8) | registers[addr+1];
+    return ((uint16_t) (registers[addr] << 8)) | registers[addr+1];
 }
 
-void GbE::CPU::write_register16(const GbE::Reg16 &reg, const uint16_t &val)
+void GbE::CPU::write_register16(const GbE::Reg16 reg, const uint16_t val)
 {
     if (reg == GbE::Reg16::AF) {
         registers[7] = (uint8_t) (val >> 8);
@@ -739,22 +778,22 @@ void GbE::CPU::write_register16(const GbE::Reg16 &reg, const uint16_t &val)
         return;
     }
 
-    uint8_t addr = ((uint8_t) reg) * 2;
+    uint8_t addr = ((uint8_t) reg) << 1;
 
     registers[addr] = (uint8_t) (val >> 8);
     registers[addr+1] = (uint8_t) (val & 0xFF);
 }
 
-uint16_t GbE::CPU::read_register16(const GbE::Reg16_SP &reg) const
+uint16_t GbE::CPU::read_register16(const GbE::Reg16_SP reg) const
 {
     if (reg == GbE::Reg16_SP::SP)
         return SP;
 
     uint8_t addr = ((uint8_t) reg) * 2;
-    return (registers[addr] << 8) | registers[addr+1];
+    return ((uint16_t) (registers[addr] << 8)) | registers[addr+1];
 }
 
-void GbE::CPU::write_register16(const GbE::Reg16_SP &reg, const uint16_t &val)
+void GbE::CPU::write_register16(const GbE::Reg16_SP reg, const uint16_t val)
 {
     if (reg == GbE::Reg16_SP::SP) {
         SP = val;
@@ -798,17 +837,18 @@ void GbE::CPU::unknown() const {}
 uint16_t GbE::CPU::pop16()
 {
     uint16_t sp = read_register16(GbE::Reg16_SP::SP);
-    uint16_t result = read_memory(sp);
+    uint8_t lower_byte = read_memory(sp);
+    uint8_t higher_byte = read_memory(sp + 1);
 
-    result = result | (((uint16_t) read_memory(sp + 1)) << 8);
+    uint16_t result = ((uint16_t) higher_byte << 8) | lower_byte; 
     write_register16(GbE::Reg16_SP::SP, sp + 2);
 
     return result;
 }
 
-void GbE::CPU::push16(const uint16_t &val)
+void GbE::CPU::push16(const uint16_t val)
 {
-    uint8_t sp = read_register16(GbE::Reg16_SP::SP);
+    uint16_t sp = read_register16(GbE::Reg16_SP::SP);
     write_memory(sp - 1, (uint8_t) (val >> 8));
     write_memory(sp - 2, (uint8_t) (val & 0xFF));
 
@@ -1025,14 +1065,6 @@ void GbE::CPU::init_instruction_table()
     for (int i = 0; i < 11; i++) {
         itab[excluded[i]] = [this] { unknown(); };
     }
-
-    for (int i = 0; i < 256; i++) {
-        if (!itab[i]) {
-            std::cout << "Opcode "
-                      << std::hex << (unsigned int) i
-                      << " doesn't have a lambda" << std::endl;
-        }
-    }
 }
 
 void GbE::CPU::init_cb_instruction_table()
@@ -1086,14 +1118,6 @@ void GbE::CPU::init_cb_instruction_table()
 
         cbtab[inst] = instruction;
     }
-
-    for (int i = 0; i < 256; i++) {
-        if (!cbtab[i]) {
-            std::cout << "CB opcode "
-                      << std::hex << (unsigned int) i
-                      << " doesn't have a lambda" << std::endl;
-        }
-    }
 }
 
 //===========Control==============
@@ -1121,20 +1145,16 @@ void GbE::CPU::daa()
     debug_push_inst("daa");
 
     bool N_flag = get_flag(GbE::Flag::N);
-    bool N_flag = get_flag(GbE::Flag::N);
     bool C_flag = get_flag(GbE::Flag::C);
     bool H_flag = get_flag(GbE::Flag::H);
 
     uint8_t A = read_register8(GbE::Reg8::A);
 
-    std::cout << std::endl << "reg A: " << std::setw(2) << std::hex << A << std::dec << std::endl; 
-
     if (!N_flag) {
         if (C_flag || A > 0x99) {
+            set_flag(GbE::Flag::C, carry8(A, 0x60) | C_flag);
             A += 0x60;
-            set_flag(GbE::Flag::C, 1);
         }
-
         if (H_flag || (A & 0x0f) > 0x09) {
             A += 0x6;
         }
@@ -1142,19 +1162,15 @@ void GbE::CPU::daa()
         if (C_flag) {
             A -= 0x60;
         }
-
         if (H_flag) {
             A -= 0x6;
         }
     }
-
+    
     write_register8(GbE::Reg8::A, A);
 
     set_flag(GbE::Flag::Z, A == 0);
     set_flag(GbE::Flag::H, 0);
-    set_flag(GbE::Flag::H, 0);
-
-    stopped = true;
 }
 
 void GbE::CPU::scf()
@@ -1205,7 +1221,7 @@ void GbE::CPU::cb()
 
 //===========Bitwise==============
 // if !carry then store the carry, else use it
-void GbE::CPU::rla(const bool &carry)
+void GbE::CPU::rla(const bool carry)
 {
     if (carry) {
         debug_push_inst("rla");
@@ -1219,7 +1235,6 @@ void GbE::CPU::rla(const bool &carry)
         bit0 = get_flag(GbE::Flag::C);
     } else {
         bit0 = data >> 7;
-        set_flag(GbE::Flag::C, bit0);
     }
 
     data = (data << 1) | bit0;
@@ -1227,11 +1242,12 @@ void GbE::CPU::rla(const bool &carry)
     set_flag(GbE::Flag::Z, 0);
     set_flag(GbE::Flag::N, 0);
     set_flag(GbE::Flag::H, 0);
+    set_flag(GbE::Flag::C, bit0);
 
     write_register8(Reg8::A, data);
 }
 
-void GbE::CPU::rra(const bool &carry)
+void GbE::CPU::rra(const bool carry)
 {
     if (carry) {
         debug_push_inst("rra");
@@ -1258,7 +1274,7 @@ void GbE::CPU::rra(const bool &carry)
 }
 
 // prefixed by $CB
-void GbE::CPU::rl_reg8(const GbE::Reg8 &reg, const bool &carry)
+void GbE::CPU::rl_reg8(const GbE::Reg8 reg, const bool carry)
 {
     if (carry) {
         debug_push_inst("rl");
@@ -1272,11 +1288,11 @@ void GbE::CPU::rl_reg8(const GbE::Reg8 &reg, const bool &carry)
     uint8_t bit0;
     if (carry) {
         bit0 = get_flag(GbE::Flag::C);
+        data = data << 1;
     } else {
         bit0 = data >> 7;
+        data = (data << 1) | bit0;
     }
-
-    data = (data << 1) | bit0;
 
     set_flag(GbE::Flag::Z, data == 0);
     set_flag(GbE::Flag::N, 0);
@@ -1286,7 +1302,7 @@ void GbE::CPU::rl_reg8(const GbE::Reg8 &reg, const bool &carry)
     write_register8(reg, data);
 }
 
-void GbE::CPU::rr_reg8(const GbE::Reg8 &reg, const bool &carry)
+void GbE::CPU::rr_reg8(const GbE::Reg8 reg, const bool carry)
 {
     if (carry) {
         debug_push_inst("rr");
@@ -1300,11 +1316,11 @@ void GbE::CPU::rr_reg8(const GbE::Reg8 &reg, const bool &carry)
     uint8_t bit7;
     if (carry) {
         bit7 = get_flag(GbE::Flag::C);
+        data = data >> 1;
     } else {
         bit7 = data << 7;
+        data = (data >> 1) | bit7;
     }
-
-    data = (data >> 1) | bit7;
 
     set_flag(GbE::Flag::Z, data == 0);
     set_flag(GbE::Flag::N, 0);
@@ -1314,7 +1330,7 @@ void GbE::CPU::rr_reg8(const GbE::Reg8 &reg, const bool &carry)
     write_register8(reg, data);
 }
 
-void GbE::CPU::sla_reg8(const GbE::Reg8 &reg)
+void GbE::CPU::sla_reg8(const GbE::Reg8 reg)
 {
     debug_push_inst("sla");
 
@@ -1329,7 +1345,7 @@ void GbE::CPU::sla_reg8(const GbE::Reg8 &reg)
     write_register8(reg, data << 1);
 }
 
-void GbE::CPU::sra_reg8(const GbE::Reg8 &reg)
+void GbE::CPU::sra_reg8(const GbE::Reg8 reg)
 {
     debug_push_inst("sra");
 
@@ -1343,10 +1359,10 @@ void GbE::CPU::sra_reg8(const GbE::Reg8 &reg)
     set_flag(GbE::Flag::H, 0);
     set_flag(GbE::Flag::C, data & 1);
 
-    write_register8(reg, (data >> 1) || bit7);
+    write_register8(reg, (data >> 1) | bit7);
 }
 
-void GbE::CPU::srl_reg8(const GbE::Reg8 &reg)
+void GbE::CPU::srl_reg8(const GbE::Reg8 reg)
 {
     debug_push_inst("srl");
 
@@ -1362,7 +1378,7 @@ void GbE::CPU::srl_reg8(const GbE::Reg8 &reg)
     write_register8(reg, data >> 1);
 }
 
-void GbE::CPU::swap_reg8(const GbE::Reg8 &reg) {
+void GbE::CPU::swap_reg8(const GbE::Reg8 reg) {
     debug_push_inst("swap");
 
     debug_push_reg(reg);
@@ -1381,21 +1397,23 @@ void GbE::CPU::swap_reg8(const GbE::Reg8 &reg) {
     write_register8(reg, high | low);
 }
 
-void GbE::CPU::bit_reg8(const GbE::Reg8 &reg, const uint8_t &bit) {
+void GbE::CPU::bit_reg8(const GbE::Reg8 reg, const uint8_t bit) {
     debug_push_inst("bit");
 
     debug_push_arg(std::to_string(bit));
     debug_push_reg(reg);
     uint8_t data = read_register8(reg);
 
-    uint8_t bitData = (data << (7 - bit)) >> 7;
+    uint8_t mask = 1 << bit;
+
+    bool bitData = (data & mask) > 0;
 
     set_flag(GbE::Flag::Z, !bitData);
     set_flag(GbE::Flag::N, 0);
-    set_flag(GbE::Flag::H, 0);
+    set_flag(GbE::Flag::H, 1);
 }
 
-void GbE::CPU::res_reg8(const GbE::Reg8 &reg, const uint8_t &bit) {
+void GbE::CPU::res_reg8(const GbE::Reg8 reg, const uint8_t bit) {
     debug_push_inst("res");
 
     debug_push_arg(std::to_string(bit));
@@ -1406,21 +1424,23 @@ void GbE::CPU::res_reg8(const GbE::Reg8 &reg, const uint8_t &bit) {
     write_register8(reg, data);
 }
 
-void GbE::CPU::set_reg8(const GbE::Reg8 &reg, const uint8_t &bit)
+void GbE::CPU::set_reg8(const GbE::Reg8 reg, const uint8_t bit)
 {
     debug_push_inst("set");
 
     debug_push_arg(std::to_string(bit));
     debug_push_reg(reg);
     uint8_t data = read_register8(reg);
-    data = data | 1 << bit;
 
+    uint8_t mask = 1 << bit;
+
+    data = (data & ~mask) ^ mask;
     write_register8(reg, data);
 }
 //===========Bitwise==============
 
 //========16-bit loads============
-void GbE::CPU::load_reg16_d16(const GbE::Reg16_SP &reg) {
+void GbE::CPU::load_reg16_d16(const GbE::Reg16_SP reg) {
     debug_push_inst("ld");
     debug_push_reg(reg);
 
@@ -1434,13 +1454,16 @@ void GbE::CPU::load_reg16_d16(const GbE::Reg16_SP &reg) {
 void GbE::CPU::load_HL_SP_s8() {
     debug_push_inst("ld");
     debug_push_reg(GbE::Reg16::HL);
+
     int8_t s8 = fetch_signed();
     debug_push_custom_arg(std::string("SP+") + std::to_string((int) s8));
 
     uint16_t result = read_register16(GbE::Reg16_SP::SP) + s8;
 
-    set_flag(GbE::Flag::H, half_carry_happened16(SP, s8));
-    set_flag(GbE::Flag::C, carry_happened16(SP, s8));
+    set_flag(GbE::Flag::Z, 0);
+    set_flag(GbE::Flag::N, 0);
+    set_flag(GbE::Flag::H, half_carry16(SP, (int) s8));
+    set_flag(GbE::Flag::C, carry16(SP, (int) s8));
 
     write_register16(GbE::Reg16::HL, result);
 }
@@ -1464,14 +1487,14 @@ void GbE::CPU::load_a16_SP()
     write_memory(addr, read_register16(GbE::Reg16_SP::SP));
 }
 
-void GbE::CPU::pop(const GbE::Reg16 &reg)
+void GbE::CPU::pop(const GbE::Reg16 reg)
 {
     debug_push_inst("pop");
     debug_push_reg(reg);
     write_register16(reg, pop16());
 }
 
-void GbE::CPU::push(const GbE::Reg16 &reg)
+void GbE::CPU::push(const GbE::Reg16 reg)
 {
     debug_push_inst("push");
     debug_push_reg(reg);
@@ -1481,7 +1504,7 @@ void GbE::CPU::push(const GbE::Reg16 &reg)
 //========16-bit loads============
 
 //=========8-bit loads============
-void GbE::CPU::load_reg8_d8(const GbE::Reg8 &reg)
+void GbE::CPU::load_reg8_d8(const GbE::Reg8 reg)
 {
     debug_push_inst("ld");
     debug_push_reg(reg);
@@ -1492,7 +1515,7 @@ void GbE::CPU::load_reg8_d8(const GbE::Reg8 &reg)
     write_register8(reg, data);
 }
 
-void GbE::CPU::load_aReg16_A(const GbE::Reg16_Addr &reg)
+void GbE::CPU::load_aReg16_A(const GbE::Reg16_Addr reg)
 {
     debug_push_inst("ld");
     debug_push_reg(reg);
@@ -1505,11 +1528,9 @@ void GbE::CPU::load_aReg16_A(const GbE::Reg16_Addr &reg)
     } else if (reg == GbE::Reg16_Addr::DE) {
         addr = read_register16(GbE::Reg16::DE);
     } else if (reg == GbE::Reg16_Addr::HLD) {
-        //std::cout << "its decrement" << std::endl;
         addr = read_register16(GbE::Reg16::HL);
         write_register16(GbE::Reg16::HL, addr - 1);
     } else if (reg == GbE::Reg16_Addr::HLI) {
-        //std::cout << "its increment" << std::endl;
         addr = read_register16(GbE::Reg16::HL);
         write_register16(GbE::Reg16::HL, addr + 1);
     }
@@ -1517,7 +1538,7 @@ void GbE::CPU::load_aReg16_A(const GbE::Reg16_Addr &reg)
     write_memory(addr, read_register8(GbE::Reg8::A));
 }
 
-void GbE::CPU::load_A_aReg16(const GbE::Reg16_Addr &reg)
+void GbE::CPU::load_A_aReg16(const GbE::Reg16_Addr reg)
 {
     debug_push_inst("ld");
     debug_push_reg(GbE::Reg8::A);
@@ -1540,7 +1561,7 @@ void GbE::CPU::load_A_aReg16(const GbE::Reg16_Addr &reg)
     write_register8(GbE::Reg8::A, read_memory(addr));
 }
 
-void GbE::CPU::load_reg8_reg8(const GbE::Reg8 &reg1, const GbE::Reg8 &reg2)
+void GbE::CPU::load_reg8_reg8(const GbE::Reg8 reg1, const GbE::Reg8 reg2)
 {
     debug_push_inst("ld");
     debug_push_reg(reg1);
@@ -1618,7 +1639,7 @@ void GbE::CPU::load_A_a16()
 //=========8-bit loads============
 
 //======16-bit arithmetic=========
-void GbE::CPU::inc_reg16(const GbE::Reg16_SP &reg16)
+void GbE::CPU::inc_reg16(const GbE::Reg16_SP reg16)
 {
     debug_push_inst("inc");
     debug_push_reg(reg16);
@@ -1626,7 +1647,7 @@ void GbE::CPU::inc_reg16(const GbE::Reg16_SP &reg16)
     write_register16(reg16, read_register16(reg16) + 1);
 }
 
-void GbE::CPU::dec_reg16(const GbE::Reg16_SP &reg16)
+void GbE::CPU::dec_reg16(const GbE::Reg16_SP reg16)
 {
     debug_push_inst("dec");
     debug_push_reg(reg16);
@@ -1634,7 +1655,7 @@ void GbE::CPU::dec_reg16(const GbE::Reg16_SP &reg16)
     write_register16(reg16, read_register16(reg16) - 1);
 }
 
-void GbE::CPU::add_HL_reg16(const GbE::Reg16_SP &reg16)
+void GbE::CPU::add_HL_reg16(const GbE::Reg16_SP reg16)
 {
     debug_push_inst("add");
     debug_push_reg(GbE::Reg16::HL);
@@ -1645,8 +1666,8 @@ void GbE::CPU::add_HL_reg16(const GbE::Reg16_SP &reg16)
     uint16_t result = val1 + val2;
 
     set_flag(GbE::Flag::N, 0);
-    set_flag(GbE::Flag::H, half_carry_happened16(val1, val2));
-    set_flag(GbE::Flag::C, carry_happened16(val1, val2));
+    set_flag(GbE::Flag::H, half_carry16(val1, val2));
+    set_flag(GbE::Flag::C, carry16(val1, val2));
 
     write_register16(GbE::Reg16::HL, result);
 }
@@ -1665,43 +1686,43 @@ void GbE::CPU::add_SP_s8()
 
     set_flag(GbE::Flag::Z, 0);
     set_flag(GbE::Flag::N, 0);
-    set_flag(GbE::Flag::H, half_carry_happened16(val1, val2));
-    set_flag(GbE::Flag::C, carry_happened16(val1, val2));
+    set_flag(GbE::Flag::H, half_carry16(val1, (int) val2));
+    set_flag(GbE::Flag::C, carry16(val1, (int) val2));
 
     write_register16(GbE::Reg16_SP::SP, result);
 }
 //======16-bit arithmetic=========
 
 //=======8-bit arithmetic=========
-void GbE::CPU::inc_reg8(const GbE::Reg8 &reg)
+void GbE::CPU::inc_reg8(const GbE::Reg8 reg)
 {
     debug_push_inst("inc");
     debug_push_reg(reg);
 
     uint8_t val = read_register8(reg);
-    uint8_t newVal = read_register8(reg) + 1;
-    write_register8(reg, newVal);
+    uint8_t result = val + 1;
+    write_register8(reg, result);
 
-    set_flag(GbE::Flag::Z, newVal == 0);
+    set_flag(GbE::Flag::Z, result == 0);
     set_flag(GbE::Flag::N, 0);
-    set_flag(GbE::Flag::H, half_carry_happened8(val, 1));
+    set_flag(GbE::Flag::H, half_carry8(val, 1));
 }
 
-void GbE::CPU::dec_reg8(const GbE::Reg8 &reg)
+void GbE::CPU::dec_reg8(const GbE::Reg8 reg)
 {
     debug_push_inst("dec");
     debug_push_reg(reg);
 
     uint8_t val = read_register8(reg);
-    uint8_t newVal = read_register8(reg) - 1;
-    write_register8(reg, newVal);
+    uint8_t result = val - 1;
+    write_register8(reg, result);
 
-    set_flag(GbE::Flag::Z, newVal == 0);
+    set_flag(GbE::Flag::Z, result == 0);
     set_flag(GbE::Flag::N, 1);
-    set_flag(GbE::Flag::H, half_carry_happened8(val, -1));
+    set_flag(GbE::Flag::H, half_carry_sub8(val, 1));
 }
 
-void GbE::CPU::add_reg8(const GbE::Reg8 &reg)
+void GbE::CPU::add_reg8(const GbE::Reg8 reg)
 {
     debug_push_inst("add");
     debug_push_reg(GbE::Reg8::A);
@@ -1713,8 +1734,8 @@ void GbE::CPU::add_reg8(const GbE::Reg8 &reg)
 
     set_flag(GbE::Flag::Z, result == 0);
     set_flag(GbE::Flag::N, 0);
-    set_flag(GbE::Flag::H, half_carry_happened8(val1, val2));
-    set_flag(GbE::Flag::C, carry_happened8(val1, val2));
+    set_flag(GbE::Flag::H, half_carry8(val1, val2));
+    set_flag(GbE::Flag::C, carry8(val1, val2));
 
     write_register8(GbE::Reg8::A, result);
 }
@@ -1733,13 +1754,13 @@ void GbE::CPU::add_d8()
 
     set_flag(GbE::Flag::Z, result == 0);
     set_flag(GbE::Flag::N, 0);
-    set_flag(GbE::Flag::H, half_carry_happened8(val1, val2));
-    set_flag(GbE::Flag::C, carry_happened8(val1, val2));
+    set_flag(GbE::Flag::H, half_carry8(val1, val2));
+    set_flag(GbE::Flag::C, carry8(val1, val2));
 
     write_register8(GbE::Reg8::A, result);
 }
 
-void GbE::CPU::adc_reg8(const GbE::Reg8 &reg)
+void GbE::CPU::adc_reg8(const GbE::Reg8 reg)
 {
     debug_push_inst("adc");
     debug_push_reg(GbE::Reg8::A);
@@ -1750,12 +1771,16 @@ void GbE::CPU::adc_reg8(const GbE::Reg8 &reg)
     debug_push_reg(reg);
     uint8_t result = val1 + val2 + get_flag(GbE::Flag::C);
 
+    uint8_t half_carry = half_carry8(val1, val2);
+    half_carry = half_carry | half_carry8(val1 + val2, 1);
+
+    uint8_t carry = carry8(val1, val2);
+    carry = carry | carry8(val1 + val2, 1);
+
     set_flag(GbE::Flag::Z, result == 0);
     set_flag(GbE::Flag::N, 0);
-    set_flag(GbE::Flag::H, half_carry_happened8(val1, val2));
-    set_flag(GbE::Flag::C, carry_happened8(val1, val2));
-
-    write_register8(GbE::Reg8::A, result);
+    set_flag(GbE::Flag::H, half_carry);
+    set_flag(GbE::Flag::C, carry);
 }
 
 void GbE::CPU::adc_d8()
@@ -1769,15 +1794,21 @@ void GbE::CPU::adc_d8()
     debug_push_val_u8(val2);
     uint8_t result = val1 + val2 + get_flag(GbE::Flag::C);
 
+    uint8_t half_carry = half_carry8(val1, val2);
+    half_carry = half_carry | half_carry8(val1 + val2, 1);
+
+    uint8_t carry = carry8(val1, val2);
+    carry = carry | carry8(val1 + val2, 1);
+
     set_flag(GbE::Flag::Z, result == 0);
     set_flag(GbE::Flag::N, 0);
-    set_flag(GbE::Flag::H, half_carry_happened8(val1, val2));
-    set_flag(GbE::Flag::C, carry_happened8(val1, val2));
+    set_flag(GbE::Flag::H, half_carry);
+    set_flag(GbE::Flag::C, carry);
 
     write_register8(GbE::Reg8::A, result);
 }
 
-void GbE::CPU::sub_reg8(const GbE::Reg8 &reg)
+void GbE::CPU::sub_reg8(const GbE::Reg8 reg)
 {
     debug_push_inst("sub");
     debug_push_reg(GbE::Reg8::A);
@@ -1790,8 +1821,8 @@ void GbE::CPU::sub_reg8(const GbE::Reg8 &reg)
 
     set_flag(GbE::Flag::Z, result == 0);
     set_flag(GbE::Flag::N, 1);
-    set_flag(GbE::Flag::H, half_carry_happened8(val1, val2));
-    set_flag(GbE::Flag::C, carry_happened8(val1, val2));
+    set_flag(GbE::Flag::H, half_carry_sub8(val1, val2));
+    set_flag(GbE::Flag::C, carry_sub8(val1, val2));
 
     write_register8(GbE::Reg8::A, result);
 }
@@ -1809,13 +1840,13 @@ void GbE::CPU::sub_d8()
 
     set_flag(GbE::Flag::Z, result == 0);
     set_flag(GbE::Flag::N, 1);
-    set_flag(GbE::Flag::H, half_carry_happened8(val1, val2));
-    set_flag(GbE::Flag::C, carry_happened8(val1, val2));
+    set_flag(GbE::Flag::H, half_carry_sub8(val1, val2));
+    set_flag(GbE::Flag::C, carry_sub8(val1, val2));
 
     write_register8(GbE::Reg8::A, result);
 }
 
-void GbE::CPU::sbc_reg8(const GbE::Reg8 &reg)
+void GbE::CPU::sbc_reg8(const GbE::Reg8 reg)
 {
     debug_push_inst("sbc");
     debug_push_reg(GbE::Reg8::A);
@@ -1826,10 +1857,16 @@ void GbE::CPU::sbc_reg8(const GbE::Reg8 &reg)
     debug_push_reg(reg);
     uint8_t result = val1 - val2 - get_flag(GbE::Flag::C);
 
+    uint8_t half_carry = half_carry_sub8(val1, val2);
+    half_carry = half_carry | half_carry_sub8(val1 - val2, 1);
+
+    uint8_t carry = carry_sub8(val1, val2);
+    carry = carry | carry_sub8(val1 - val2, 1);
+
     set_flag(GbE::Flag::Z, result == 0);
     set_flag(GbE::Flag::N, 1);
-    set_flag(GbE::Flag::H, half_carry_happened8(val1, val2));
-    set_flag(GbE::Flag::C, carry_happened8(val1, val2));
+    set_flag(GbE::Flag::H, half_carry);
+    set_flag(GbE::Flag::C, carry);
 
     write_register8(GbE::Reg8::A, result);
 }
@@ -1845,15 +1882,21 @@ void GbE::CPU::sbc_d8()
     debug_push_val_u8(val2);
     uint8_t result = val1 - val2 - get_flag(GbE::Flag::C);
 
+    uint8_t half_carry = half_carry_sub8(val1, val2);
+    half_carry = half_carry | half_carry_sub8(val1 - val2, 1);
+
+    uint8_t carry = carry_sub8(val1, val2);
+    carry = carry | carry_sub8(val1 - val2, 1);
+
     set_flag(GbE::Flag::Z, result == 0);
     set_flag(GbE::Flag::N, 1);
-    set_flag(GbE::Flag::H, half_carry_happened8(val1, val2));
-    set_flag(GbE::Flag::C, carry_happened8(val1, val2));
+    set_flag(GbE::Flag::H, half_carry);
+    set_flag(GbE::Flag::C, carry);
 
     write_register8(GbE::Reg8::A, result);
 }
 
-void GbE::CPU::and_reg8(const GbE::Reg8 &reg)
+void GbE::CPU::and_reg8(const GbE::Reg8 reg)
 {
     debug_push_inst("and");
     debug_push_reg(GbE::Reg8::A);
@@ -1891,7 +1934,7 @@ void GbE::CPU::and_d8()
     write_register8(GbE::Reg8::A, result);
 }
 
-void GbE::CPU::xor_reg8(const GbE::Reg8 &reg)
+void GbE::CPU::xor_reg8(const GbE::Reg8 reg)
 {
     debug_push_inst("xor");
     debug_push_reg(GbE::Reg8::A);
@@ -1929,7 +1972,7 @@ void GbE::CPU::xor_d8()
     write_register8(GbE::Reg8::A, result);
 }
 
-void GbE::CPU::or_reg8(const GbE::Reg8 &reg)
+void GbE::CPU::or_reg8(const GbE::Reg8 reg)
 {
     debug_push_inst("or");
     debug_push_reg(GbE::Reg8::A);
@@ -1967,7 +2010,7 @@ void GbE::CPU::or_d8()
     write_register8(GbE::Reg8::A, result);
 }
 
-void GbE::CPU::cp_reg8(const GbE::Reg8 &reg)
+void GbE::CPU::cp_reg8(const GbE::Reg8 reg)
 {
     debug_push_inst("cp");
     debug_push_reg(GbE::Reg8::A);
@@ -1980,8 +2023,8 @@ void GbE::CPU::cp_reg8(const GbE::Reg8 &reg)
 
     set_flag(GbE::Flag::Z, result == 0);
     set_flag(GbE::Flag::N, 1);
-    set_flag(GbE::Flag::H, half_carry_happened8(val1, val2));
-    set_flag(GbE::Flag::C, carry_happened8(val1, val2));
+    set_flag(GbE::Flag::H, half_carry_sub8(val1, val2));
+    set_flag(GbE::Flag::C, carry_sub8(val1, val2));
 }
 
 void GbE::CPU::cp_d8()
@@ -1997,15 +2040,15 @@ void GbE::CPU::cp_d8()
 
     set_flag(GbE::Flag::Z, result == 0);
     set_flag(GbE::Flag::N, 1);
-    set_flag(GbE::Flag::H, half_carry_happened8(val1, val2));
-    set_flag(GbE::Flag::C, carry_happened8(val1, val2));
+    set_flag(GbE::Flag::H, half_carry_sub8(val1, val2));
+    set_flag(GbE::Flag::C, carry_sub8(val1, val2));
 }
 //=======8-bit arithmetic=========
 
 //============Jumps===============
 // invoke if flag == val
 // relative jumps
-void GbE::CPU::jr_F_s8(const GbE::CF &flag, const bool &val)
+void GbE::CPU::jr_F_s8(const GbE::CF flag, const bool val)
 {
     debug_push_inst("jr");
     if (val)
@@ -2017,13 +2060,15 @@ void GbE::CPU::jr_F_s8(const GbE::CF &flag, const bool &val)
     debug_push_val_s8(s);
 
     bool flagVal;
-    if (flag == GbE::CF::Z)
+    if (flag == GbE::CF::Z) {
         flagVal = get_flag(GbE::Flag::Z);
-    else
+    } else {
         flagVal = get_flag(GbE::Flag::C);
+    }
 
-    if (flagVal == val)
+    if (flagVal == val) {
         PC += s;
+    }
 }
 
 void GbE::CPU::jr_s8()
@@ -2041,7 +2086,7 @@ void GbE::CPU::jr_s8()
 }
 
 // absolute jumps
-void GbE::CPU::jp_F_a16(const GbE::CF &flag, const bool &val)
+void GbE::CPU::jp_F_a16(const GbE::CF flag, const bool val)
 {
     debug_push_inst("jp");
     if (val)
@@ -2053,13 +2098,15 @@ void GbE::CPU::jp_F_a16(const GbE::CF &flag, const bool &val)
     debug_push_addr16(addr);
 
     bool flagVal;
-    if (flag == GbE::CF::Z)
+    if (flag == GbE::CF::Z) {
         flagVal = get_flag(GbE::Flag::Z);
-    else
+    } else {
         flagVal = get_flag(GbE::Flag::C);
+    }
 
-    if (flagVal == val)
-        PC = val;
+    if (flagVal == val) {
+        PC = addr;
+    }
 }
 
 void GbE::CPU::jp_a16()
@@ -2079,7 +2126,7 @@ void GbE::CPU::jp_HL()
 }
 
 // calls
-void GbE::CPU::call_F_a16(const GbE::CF &flag, const bool &val)
+void GbE::CPU::call_F_a16(const GbE::CF flag, const bool val)
 {
     debug_push_inst("call");
     if (val)
@@ -2091,10 +2138,11 @@ void GbE::CPU::call_F_a16(const GbE::CF &flag, const bool &val)
     debug_push_addr16(addr);
 
     bool flagVal;
-    if (flag == GbE::CF::Z)
+    if (flag == GbE::CF::Z) {
         flagVal = get_flag(GbE::Flag::Z);
-    else
+    } else {
         flagVal = get_flag(GbE::Flag::C);
+    }
 
     if (flagVal == val) {
         push16(PC);
@@ -2113,7 +2161,7 @@ void GbE::CPU::call_a16()
 }
 
 // returns
-void GbE::CPU::ret_F(const GbE::CF &flag, const bool &val)
+void GbE::CPU::ret_F(const GbE::CF flag, const bool val)
 {
     debug_push_inst("ret");
     if (val)
@@ -2122,10 +2170,11 @@ void GbE::CPU::ret_F(const GbE::CF &flag, const bool &val)
         debug_push_flag_n(flag);
 
     bool flagVal;
-    if (flag == GbE::CF::Z)
+    if (flag == GbE::CF::Z) {
         flagVal = get_flag(GbE::Flag::Z);
-    else
+    } else {
         flagVal = get_flag(GbE::Flag::C);
+    }
 
     if (flagVal == val) {
         PC = pop16();
@@ -2141,18 +2190,19 @@ void GbE::CPU::ret()
 void GbE::CPU::reti()
 {
     debug_push_inst("reti");
-    ei();
-    ret();
+    enable_interrupts = true;
+    PC = pop16();
 }
 
 // resets
-void GbE::CPU::rst_val(const uint8_t &val)
+void GbE::CPU::rst_val(const uint8_t val)
 {
     debug_push_inst("rst");
     debug_push_val_u8(val);
 
     push16(PC);
 
-    PC = read_memory(val);
+    uint16_t addr = ((val >> 1) << 4) | ((val & 1) << 3);
+    PC = read_memory(addr);
 }
 //============Jumps===============
