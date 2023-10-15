@@ -17,7 +17,7 @@ enum class Reg16_Addr {BC=0, DE=1, HLI=2, HLD=3};
 
 enum class CF {Z, C}; // zero or carry
 
-enum class Flag {Z=0, N=1, C=2, H=3};
+enum class Flag {Z=0, N=1, H=2, C=3};
 
 struct MemoryValue {
     uint16_t addr;
@@ -38,8 +38,8 @@ struct State {
 
     bool fZ;
     bool fN;
-    bool fC;
     bool fH;
+    bool fC;
 
     std::vector<MemoryValue> mem_delta;
 };
@@ -80,6 +80,7 @@ public:
     CPU();
     ~CPU();
 
+    void use_testing_memory();
     void init(const State &state);
 
     void resume();
@@ -396,6 +397,8 @@ private:
     uint8_t* rom = nullptr;
 
     uint8_t* external_ram = nullptr;
+
+    uint8_t* testing_memory = nullptr;
 };
 };
 
