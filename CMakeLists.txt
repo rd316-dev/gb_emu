@@ -11,8 +11,10 @@ set(CMAKE_CXX_FLAGS "-static-libgcc -static-libstdc++")
 
 add_executable(gb_emu
     src/main.cpp
-    src/gameboyemulator.h src/gameboyemulator.cpp
-    src/gbtest.h src/gbtest.cpp
+    src/gameboyemulator.cpp
+    src/gbtest.cpp
+
+    src/utils.cpp
 
     src/imgui_impl_sdlrenderer2.cpp
     src/imgui_impl_sdl2.cpp
@@ -24,6 +26,7 @@ add_executable(gb_emu
 )
 target_include_directories(gb_emu
     PRIVATE src/
+    PUBLIC include/
     PUBLIC "${SDL2_PATH}/x86_64-w64-mingw32/include"
     PUBLIC "${IMGUI_PATH}"
 )
