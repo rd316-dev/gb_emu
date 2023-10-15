@@ -21,6 +21,10 @@ uint32_t utils::from_hex(const std::string &str)
         uint8_t digit;
         bool found = false;
 
+        if (val == 0 && c == 'x' || c == 'X') {
+            continue;
+        }
+
         for (int i = 0; i < hex_chars.size(); i++) {
             const char pc = hex_chars.at(i);
             if (c > 'F') {
