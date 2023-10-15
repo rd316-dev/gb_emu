@@ -1,43 +1,70 @@
 #define SDL_MAIN_HANDLED
 
-#include "tinyfiledialogs.h"
-#include "imgui.h"
-#include "imgui_impl_sdl2.h"
-#include "imgui_impl_sdlrenderer2.h"
+#include <tinyfiledialogs.h>
+#include <imgui.h>
+#include <imgui_impl_sdl2.h>
+#include <imgui_impl_sdlrenderer2.h>
 
 #ifdef _WIN32
-#include "windows.h"
+#include <windows.h>
 #endif
 
-#include "SDL2/SDL.h"
+#include <SDL2/SDL.h>
 
 #include <iostream>
 #include <fstream>
 #include <iomanip>
 #include <vector>
+#include <filesystem>
 
+#include "utils.h"
 #include "gameboyemulator.h"
 #include "gbtest.h"
 
-typedef struct DEBUG_INSTRUCTION {
+struct DebugInstruction {
     uint16_t address = 0;
     uint8_t opcode = 0;
     std::string inst = "";
     std::string arg1 = "";
     std::string arg2 = "";
-} DebugInstruction;
+};
 
-typedef struct BREAKPOINT {
+struct Breakpoint {
     uint16_t address;
     bool enabled;
-} Breakpoint;
+};
+
+struct MemoryRegion {
+    const std::string label = "";
+    const uint16_t start = 0;
+    const uint16_t end = 0;
+    bool selected = false;
+};
+
+std::vector<MemoryRegion> memory_regions = {
+    {"ROM Bank 00 (16 KiB)", 0x0000, 0x3FFF, false},
+    {"ROM Bank NN (16 KiB)", 0x4000, 0x7FFF, false},
+    {"VRAM (8 KiB)",         0x8000, 0x9FFF, false},
+    {"External RAM (8 KiB)", 0xA000, 0xBFFF, false},
+    {"WRAM Bank 0 (4 KiB)",  0xC000, 0xCFFF, false},
+    {"WRAM Bank N (4 KiB)",  0xD000, 0xDFFF, false},
+    {"OAM",                  0xFE00, 0xFE9F, false},
+    {"I/O Registers",        0xFF00, 0xFF7F, false},
+    {"HRAM",                 0xFF80, 0xFFFE, false},
+};
+
+int current_memory_region = -1;
+int selected_hex_row = -1;
+int selected_hex_column = -1;
+
+int breakpoing_input = 0;
 
 std::vector<Breakpoint> breakpoints = {
-    {0x000c, true}
+    {0x100, true}
 };
 
 std::vector<DebugInstruction> instruction_listing;
-int max_instructions_in_listing = 10;
+int max_instructions_in_listing = 100;
 
 bool use_breakpoints = true;
 bool cycling_enabled = true;
@@ -46,7 +73,7 @@ bool breakpoint_reached = false;
 bool output_instr = true;
 bool testing_mode = true;
 
-int cycles_per_frame = 10000;
+int cycles_per_frame = 50000;
 
 uint64_t cycles = 0;
 
@@ -57,21 +84,28 @@ bool is_active()
     return cycling_enabled && !breakpoint_reached && !emu->isStopped() && !emu->isHalted();
 }
 
-std::string to_hex(uint32_t val, int length)
+std::string read_text_file(const std::string &path)
 {
-    std::stringstream stream;
-    stream << std::setfill('0') << std::setw(length)
-           << std::hex << val;
+    std::ifstream input(path);
 
-    return stream.str();
+    if (!input.is_open()) {
+        std::cout << "error: couldn't open text file " << path << std::endl;
+        return nullptr;
+    }
+
+    std::stringstream buffer;
+    buffer << input.rdbuf();
+
+    return buffer.str();
 }
 
-uint8_t* load_file(const std::string &path, size_t *size)
+uint8_t* read_binary_file(const std::string &path, size_t *size)
 {
     std::ifstream input(path, std::ios::binary);
 
     if (!input.is_open()) {
-        std::cout << "Error while opening file " << path << std::endl;
+        std::cout << "error: couldn't open binary file " << path << std::endl;
+        return nullptr;
     }
 
     std::vector<uint8_t> buffer(std::istreambuf_iterator<char>(input), {});
@@ -123,7 +157,7 @@ bool emu_cycle()
         std::cout << "Received HALT" << std::endl;
         return false;
     } else if (emu->isStopped()) {
-        std::cout << "Received STOP" << std::endl;
+        //std::cout << "Received STOP" << std::endl;
         return false;
     }
 
@@ -195,6 +229,7 @@ void debugger_main()
         }
     } else {
         if (ImGui::Button("Cycle")) {
+            cycling_enabled = false;
             emu_cycle();
         }
         if (ImGui::Button("Resume")) {
@@ -205,9 +240,20 @@ void debugger_main()
     }
 
     if (ImGui::Button("Print SPI")) {
-        std::cout << "SPI buffer data:\n"
-                  << emu->get_spi_buffer_data().data() << std::endl
-                  << "SPI buffer data end" << std::endl;
+        std::cout << "\nSPI buffer data:" << std::endl;
+        for (const uint8_t b : emu->get_spi_buffer_data()) {
+            std::cout << "byte: " << utils::to_hex(b, 2) << " | char: ";
+            char c = (char) b;
+            if (c == '\n') {
+                std::cout << "\\n";
+            } else {
+                std::cout << c;
+            }
+
+            std::cout << std::endl;
+        }
+
+        std::cout << "Printed" << std::endl;
     }
 
     ImGui::End();
@@ -220,6 +266,13 @@ void debugger_breakpoints()
     }
 
     ImGui::Checkbox("Breakpoints active", &use_breakpoints);
+
+    ImGui::InputInt("Hex", &breakpoing_input, 0x1, 0xF, ImGuiInputTextFlags_::ImGuiInputTextFlags_CharsHexadecimal);
+    
+    if (ImGui::Button("Add breakpoint")) {
+        breakpoints.push_back(Breakpoint{(uint16_t) breakpoing_input, true});
+        breakpoing_input = 0;
+    }
 
     if (ImGui::BeginTable("Breakpoints", 2)) {
         ImGui::TableNextRow();
@@ -282,10 +335,10 @@ void debugger_program_listing()
 
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
-            ImGui::Text(to_hex(i->address, 4).c_str());
+            ImGui::Text(utils::to_hex(i->address, 4).c_str());
             
             ImGui::TableNextColumn();
-            ImGui::Text(to_hex(i->opcode, 2).c_str());
+            ImGui::Text(utils::to_hex(i->opcode, 2).c_str());
             
             ImGui::TableNextColumn();
             ImGui::Text(padded_inst.c_str());
@@ -302,12 +355,39 @@ void debugger_program_listing()
     ImGui::End();
 }
 
-void debug_hex_editor()
+void debugger_hex_viewer()
 {
     if (!ImGui::Begin("Hex Viewer"))
         return;
 
-    if (ImGui::BeginTable("HEX", 17)) {
+    std::string current_preview = "Choose memory region to display";
+
+    if (current_memory_region != -1) {
+        current_preview = memory_regions[current_memory_region].label;
+    }
+
+    if (ImGui::BeginCombo("Memory region", current_preview.c_str())) {
+        for (int i = 0; i < memory_regions.size(); i++) {
+            auto current = memory_regions[i];
+            if (ImGui::Selectable(current.label.c_str(), current_memory_region == i)) {
+                current_memory_region = i;
+                selected_hex_row = -1;
+                selected_hex_column = -1;
+            }
+        }
+
+        ImGui::EndCombo();
+    }
+
+    if (current_memory_region != -1) {
+        uint16_t start = memory_regions[current_memory_region].start;
+        uint16_t end = memory_regions[current_memory_region].end;
+
+        ImGui::Text("Start: %s", utils::to_hex(start, 4).c_str());
+        ImGui::Text("End: %s", utils::to_hex(end, 4).c_str());
+
+        ImGui::BeginTable("Hex Viewer", 17);
+
         ImGui::TableNextRow();
         ImU32 index_bg_color = ImGui::GetColorU32(ImVec4(0.3f, 0.3f, 0.7f, 1.0f));
         ImU32 val_bg_color = ImGui::GetColorU32(ImVec4(0.1f, 0.1f, 0.1f, 1.0f));
@@ -316,24 +396,74 @@ void debug_hex_editor()
         ImGui::TableNextColumn();
         for (int i = 0; i < 16; i++) {
             ImGui::TableNextColumn();
-            ImGui::Text(to_hex(i, 2).c_str());
+            if (ImGui::Selectable(utils::to_hex(i, 2).c_str(), selected_hex_column == i)) {
+                selected_hex_column = i;
+                selected_hex_row = -1;
+            }
         }
 
-        for (int i = 0; i < 256; i++) {
-            ImGui::TableNextRow();
-            ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, index_bg_color);
-            ImGui::TableNextColumn();
-            ImGui::Text(to_hex(i << 4, 4).c_str());
+        for (int i = 0; i <= ((end - start) >> 4); i++) {
+            uint16_t row_addr = start + (i << 4);
 
-            ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, val_bg_color);
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            if (ImGui::Selectable(utils::to_hex(row_addr, 4).c_str(), selected_hex_row == i)) {
+                selected_hex_row = i;
+                selected_hex_column = -1;
+            }
+
             for (int j = 0; j < 16; j++) {
                 ImGui::TableNextColumn();
 
-                uint16_t addr = (i << 4) | j;
-                uint8_t val = emu->peek_memory(addr);
+                uint16_t mem_addr = row_addr + j;
+                uint8_t val = emu->peek_memory(mem_addr);
 
-                ImGui::TextUnformatted(to_hex(val, 2).c_str());
+                if (ImGui::Selectable(utils::to_hex(val, 2).c_str(), selected_hex_row == i || selected_hex_column == j)) {
+                    selected_hex_row = i;
+                    selected_hex_column = j;
+                }
             }
+        }
+
+        ImGui::EndTable();
+    }
+
+    ImGui::End();
+}
+
+void debugger_stack_viewer()
+{
+    if (!ImGui::Begin("Stack Viewer")) {
+        return;
+    }
+
+    if (ImGui::BeginTable("Stack", 3)) {
+        uint16_t sp = emu->read_register16(GbE::Reg16_SP::SP);
+        uint16_t stack_top = 0x9FFF;
+
+        ImGui::TableNextRow();
+
+        ImGui::TableNextColumn();
+        ImGui::Text("#");
+        ImGui::TableNextColumn();
+        ImGui::Text("Address");
+        ImGui::TableNextColumn();
+        ImGui::Text("Value");
+
+        uint16_t rows = (stack_top - sp);
+
+        for (uint16_t i = rows; i > 0; i--) {
+            uint16_t addr = stack_top - i;
+            uint8_t val = emu->peek_memory(addr);
+
+            ImGui::TableNextRow();
+
+            ImGui::TableNextColumn();
+            ImGui::Text("%i", i);
+            ImGui::TableNextColumn();
+            ImGui::Text(utils::to_hex(addr, 4).c_str());
+            ImGui::TableNextColumn();
+            ImGui::Text(utils::to_hex(val, 2).c_str());
         }
 
         ImGui::EndTable();
@@ -344,8 +474,24 @@ void debug_hex_editor()
 
 void start_unit_tests()
 {
-    GbTest test(emu);
+    GbE::Test test(emu);
     test.launch_tests();
+}
+
+void start_json_tests(const std::string &path)
+{
+    GbE::Test test(emu);
+
+    for (const auto &entry : std::filesystem::directory_iterator(path)) {
+        auto name = entry.path();
+        if (name.extension() != ".json") {
+            continue;
+        }
+
+        std::string data = read_text_file(name.string());
+        test.launch_json_tests(name.string(), data);
+        return;
+    }
 }
 
 int main()
@@ -409,6 +555,13 @@ int main()
     start_unit_tests();
     emu->reset();
 
+    char const * json_directory = tinyfd_selectFolderDialog(
+        "Open the folder containing JSON tests",
+        std::filesystem::current_path().string().c_str()
+    );
+    start_json_tests(json_directory);
+    emu->reset();
+
     char const * boot_rom_patterns[1] = {"*.bin"}; 
     char const * boot_rom_filename = tinyfd_openFileDialog(
         "Open Boot ROM File", 
@@ -418,8 +571,12 @@ int main()
         "Boot ROM File (.bin)",
         0
     );
+    if (boot_rom_filename == NULL) {
+        return 0;
+    }
+
     size_t boot_rom_size = 0;
-    auto boot_rom = load_file(boot_rom_filename, &boot_rom_size);
+    auto boot_rom = read_binary_file(boot_rom_filename, &boot_rom_size);
     emu->load_boot_rom(boot_rom_size, boot_rom);
 
     char const * rom_patterns[1] = {"*.gb"}; 
@@ -431,8 +588,11 @@ int main()
         "Game Boy ROM File (.gb)",
         0
     );
+    if (rom_filename == NULL) {
+        return 0;
+    }
     size_t rom_size = 0;
-    auto rom = load_file(rom_filename, &rom_size);
+    auto rom = read_binary_file(rom_filename, &rom_size);
     emu->load_rom(rom_size, rom);
 
     SDL_Event e;
@@ -459,8 +619,9 @@ int main()
         debugger_fps_counter();
         debugger_main();
         debugger_breakpoints();
-        debug_hex_editor();
+        debugger_hex_viewer();
         debugger_program_listing();
+        debugger_stack_viewer();
 
         for (int i = 0; i < cycles_per_frame && is_active(); i++) {
             if (!emu_cycle()) {
