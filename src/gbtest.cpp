@@ -23,12 +23,11 @@ GbE::Test::~Test()
     free(mem);
 }
 
-void GbE::Test::launch_json_tests(const std::string &test_name, const std::string &json)
+bool GbE::Test::launch_json_tests(const std::string &test_name, const std::string &json)
 {
     begin_test_suite("JSON tests: " + test_name);
     auto tests = nlohmann::json::parse(json);
 
-    std::cout << "Loaded " << tests.size() << " JSON tests" << std::endl;
     for (const auto &test : tests) {
         auto name = test["name"].get<std::string>();
 
@@ -58,8 +57,8 @@ void GbE::Test::launch_json_tests(const std::string &test_name, const std::strin
 
             (bool) (init_F & flag_mask(Flag::Z)),
             (bool) (init_F & flag_mask(Flag::N)),
-            (bool) (init_F & flag_mask(Flag::C)),
             (bool) (init_F & flag_mask(Flag::H)),
+            (bool) (init_F & flag_mask(Flag::C)),
             {}
         };
 
@@ -86,8 +85,8 @@ void GbE::Test::launch_json_tests(const std::string &test_name, const std::strin
 
             (bool) (final_F & flag_mask(Flag::Z)),
             (bool) (final_F & flag_mask(Flag::N)),
-            (bool) (final_F & flag_mask(Flag::C)),
             (bool) (final_F & flag_mask(Flag::H)),
+            (bool) (final_F & flag_mask(Flag::C)),
             {}
         };
 
@@ -104,13 +103,17 @@ void GbE::Test::launch_json_tests(const std::string &test_name, const std::strin
 
         if (!cycle()) {
             end_subtest_suite();
-            break;
+            end_test_suite();
+
+            return false;
         }
 
         end_subtest_suite();
     }
 
     end_test_suite();
+
+    return true;
 }
 
 void GbE::Test::launch_tests()
@@ -365,37 +368,44 @@ bool GbE::Test::execute(const uint8_t opcode, const uint8_t arg1, const uint8_t 
 
 bool GbE::Test::check()
 {
-    const std::vector<std::string> flags = {"Z", "N", "C", "H"};
+    const std::vector<std::string> flags = {"Z", "N", "H", "C"};
     const std::vector<std::string> regs8 = {"B", "C", "D", "E", "H", "L", "(HL)", "A"};
     const std::vector<std::string> regs16 = {"BC", "DE", "HL", "AF"};
     const std::vector<std::string> regs16_sp = {"BC", "DE", "HL", "SP"};
     const std::vector<std::string> regs16_addr = {"(BC)", "(DE)", "(HL+)", "(HL-)"};
 
+    std::vector<std::string> error_messages; 
     int errors = 0;
 
     if (pc_expected && emu->get_PC() != exp_pc) {
         errors++;
-        std::cout << std::hex << std::setw(4) << "PC is incorrect: " 
-                  << "expected " << exp_pc << " "
-                  << "got " << emu->get_PC()
-                  << std::dec << std::endl;
+
+        std::stringstream sstream;
+        sstream << std::hex << std::setw(4) << "PC is incorrect: " 
+                << "expected " << exp_pc << " "
+                << "got " << emu->get_PC();
+        error_messages.push_back(sstream.str());
     }
 
     if (sp_expected && emu->get_SP() != exp_sp) {
         errors++;
-        std::cout << std::hex << std::setw(4) << "SP is incorrect: " 
+
+        std::stringstream sstream;
+        sstream << std::hex << std::setw(4) << "SP is incorrect: " 
                   << "expected " << exp_sp << " "
-                  << "got " << emu->get_SP()
-                  << std::dec << std::endl;
+                  << "got " << emu->get_SP();
+        error_messages.push_back(sstream.str());
     }
 
     for (auto i : exp_flag) {
         if (emu->get_flag(i.flag) != i.val) {
             errors++;
-            std::cout << "Flag " << flags[(int) i.flag] << " is incorrect: "
+
+            std::stringstream sstream;
+            sstream << "Flag " << flags[(int) i.flag] << " is incorrect: "
                     << "expected " << i.val << " "
-                    << "got " << (emu->get_flag(i.flag) > 0)
-                    << std::endl;
+                    << "got " << (emu->get_flag(i.flag) > 0);
+            error_messages.push_back(sstream.str());
         }
     }
 
@@ -403,10 +413,12 @@ bool GbE::Test::check()
         auto val = emu->read_register8(i.reg);
         if (val != i.val) {
             errors++;
-            std::cout << std::hex << "8-bit register " << regs8[(int) i.reg] << " is incorrect: "
+
+            std::stringstream sstream;
+            sstream << std::hex << "8-bit register " << regs8[(int) i.reg] << " is incorrect: "
                       << "expected " << (unsigned int) i.val << " "
-                      << "got " << (unsigned int) val
-                      << std::dec << std::endl;
+                      << "got " << (unsigned int) val;
+            error_messages.push_back(sstream.str());
         }
     }
 
@@ -414,10 +426,12 @@ bool GbE::Test::check()
         uint16_t val = emu->read_register16(i.reg);
         if (val != i.val) {
             errors++;
-            std::cout << std::hex << "16-bit register " << regs16[(int) i.reg] << " is incorrect: "
+
+            std::stringstream sstream;
+            sstream << std::hex << "16-bit register " << regs16[(int) i.reg] << " is incorrect: "
                       << "expected " << (unsigned int) i.val << " "
-                      << "got " << (unsigned int) val
-                      << std::dec << std::endl;
+                      << "got " << (unsigned int) val;
+            error_messages.push_back(sstream.str());
         }
     }
 
@@ -425,10 +439,12 @@ bool GbE::Test::check()
         auto val = emu->read_register16(i.reg);
         if (val != i.val) {
             errors++;
-            std::cout << std::hex << "16-bit register " << regs16_sp[(int) i.reg] << " is incorrect: "
+
+            std::stringstream sstream;
+            sstream << std::hex << "16-bit register " << regs16_sp[(int) i.reg] << " is incorrect: "
                       << "expected " << (unsigned int) i.val << " "
-                      << "got " << (unsigned int) val
-                      << std::dec << std::endl;
+                      << "got " << (unsigned int) val;
+            error_messages.push_back(sstream.str());
         }
     }
 
@@ -436,10 +452,12 @@ bool GbE::Test::check()
         auto val = emu->peek_memory(i.addr);
         if (val != i.val) {
             errors++;
-            std::cout << std::hex << "8-bit unsigned value at " << i.addr << " is incorrect: "
+
+            std::stringstream sstream;
+            sstream << std::hex << "8-bit unsigned value at " << i.addr << " is incorrect: "
                       << "expected " << (unsigned int) i.val << " "
-                      << "got " << (unsigned int) val
-                      << std::dec << std::endl;
+                      << "got " << (unsigned int) val;
+            error_messages.push_back(sstream.str());
         }
     }
 
@@ -447,22 +465,33 @@ bool GbE::Test::check()
         auto val = emu->peek_memory(i.addr);
         if (val != i.val) {
             errors++;
-            std::cout << std::hex << "8-bit signed value at " << i.addr << " is incorrect: "
+
+            std::stringstream sstream;
+            sstream << std::hex << "8-bit signed value at " << i.addr << " is incorrect: "
                       << std::dec
                       << "expected " << (int) i.val << " "
-                      << "got " << (int) val
-                      << std::endl;
+                      << "got " << (int) val;
+            error_messages.push_back(sstream.str());
         }
     }
 
     if (errors > 0) {
+        std::cout << "SUBTEST SUITE [ " << subtest_suite_num << " | " << subtest_suite << " ]" << std::endl;
+        
+        for (const auto &m : error_messages) {
+            std::cout << m << std::endl;
+        }
+
         std::cout << std::dec << errors << " errors in checks found. Instruction:\n"
                   << std::hex << std::setfill('0') << std::setw(4)
                   << (unsigned int) emu->get_last_PC() << std::dec << "\t"
                   << emu->get_inst() << "\t"
                   << emu->get_arg1() << "\t"
-                  << emu->get_arg2() << "\n"
-                  << "Context values:\n";
+                  << emu->get_arg2() << std::endl;
+
+        if (context_u8.size() > 0 || context_s8.size() > 0) {
+            std::cout << "Context values:" << std::endl;
+        }
 
         for (const auto &i : context_u8) {
             std::cout << i.name << "[u8]: "
@@ -520,14 +549,10 @@ void GbE::Test::begin_subtest_suite(const std::string &name)
 {
     subtest_suite = name;
     subtest_suite_num += 1;
-
-    std::cout << "SUBTEST suite BEGIN\t[ " << subtest_suite_num << " | " << subtest_suite << " ]" << std::endl;
 }
 
 void GbE::Test::end_subtest_suite()
-{
-    std::cout << "SUBTEST suite END" << std::endl;
-}
+{}
 
 void GbE::Test::expect_state(const State &state)
 {
