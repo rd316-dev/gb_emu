@@ -26,7 +26,7 @@ class Test
 public:
     Test(CPU *emu);
     ~Test();
-    void launch_json_tests(const std::string &test_name, const std::string &json);
+    bool launch_json_tests(const std::string &test_name, const std::string &json);
     void launch_tests();
 
     void test_loads_reg8_d8();
@@ -113,7 +113,6 @@ private:
 
     int test_suite_num = 0;
     int subtest_suite_num = 0;
-    int subtest_num = 0;
 
     CPU* emu = nullptr;
     uint8_t* mem = nullptr;
