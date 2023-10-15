@@ -66,7 +66,7 @@ std::vector<Breakpoint> breakpoints = {
 std::vector<DebugInstruction> instruction_listing;
 int max_instructions_in_listing = 100;
 
-bool use_breakpoints = true;
+bool use_breakpoints = false;
 bool cycling_enabled = true;
 bool breakpoint_reached = false;
 
@@ -476,11 +476,14 @@ void start_unit_tests()
 {
     GbE::Test test(emu);
     test.launch_tests();
+
+    emu->reset();
 }
 
-void start_json_tests(const std::string &path)
+void start_json_tests(const std::string &path, int skip = 0)
 {
     GbE::Test test(emu);
+    emu->use_testing_memory();
 
     for (const auto &entry : std::filesystem::directory_iterator(path)) {
         auto name = entry.path();
@@ -488,10 +491,19 @@ void start_json_tests(const std::string &path)
             continue;
         }
 
+        uint8_t id = utils::from_hex(name.filename().string().substr(0, 2));
+
+        if (id < skip) {
+            continue;
+        }
+
         std::string data = read_text_file(name.string());
-        test.launch_json_tests(name.string(), data);
-        return;
+        if (!test.launch_json_tests(name.string(), data)) {
+            break;
+        }
     }
+
+    emu->reset();
 }
 
 int main()
@@ -513,11 +525,7 @@ int main()
         SDL_Quit();
         return 1;
     }
-
-    std::cout << "Diagonal DPI: " << ddpi <<
-               "\nHorizontal DPI: " << hdpi <<
-               "\nVertical DPI: " << vdpi << std::endl;
-
+    
     float scaling = ddpi / 96.0f;
 
     int width = 1280 * scaling;
@@ -559,8 +567,13 @@ int main()
         "Open the folder containing JSON tests",
         std::filesystem::current_path().string().c_str()
     );
-    start_json_tests(json_directory);
-    emu->reset();
+
+    if (json_directory != NULL) {
+        start_json_tests(json_directory);
+        emu->reset();
+    } else {
+        std::cout << "Skipping JSON tests" << std::endl;
+    }
 
     char const * boot_rom_patterns[1] = {"*.bin"}; 
     char const * boot_rom_filename = tinyfd_openFileDialog(
