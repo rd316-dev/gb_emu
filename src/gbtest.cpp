@@ -2,61 +2,157 @@
 #include <iomanip>
 #include <iostream>
 
-GbTest::GbTest(GbE::CPU *emu)
+#include <nlohmann/json.hpp>
+
+#include <sstream>
+
+#include "utils.h"
+
+GbE::Test::Test(CPU *emu)
 {
     this->emu = emu;
 
-    size_t size = 32 * 1024;
-    mem = (uint8_t*) malloc(size);
+    size_t mem_size = 32 * 1024;
+    mem = (uint8_t*) malloc(mem_size);
 
-    emu->load_rom(size, mem);
+    emu->load_rom(mem_size, mem);
 }
 
-GbTest::~GbTest()
+GbE::Test::~Test()
 {
     free(mem);
 }
 
-void GbTest::launch_tests()
+void GbE::Test::launch_json_tests(const std::string &test_name, const std::string &json)
+{
+    begin_test_suite("JSON tests: " + test_name);
+    auto tests = nlohmann::json::parse(json);
+
+    std::cout << "Loaded " << tests.size() << " JSON tests" << std::endl;
+    for (const auto &test : tests) {
+        auto name = test["name"].get<std::string>();
+
+        auto initial_data = test["initial"];
+        auto initial_cpu = initial_data["cpu"];
+        auto initial_ram = initial_data["ram"];
+
+        auto final_data = test["final"];
+        auto final_cpu = final_data["cpu"];
+        auto final_ram = final_data["ram"];
+
+        auto cycles = test["cycles"];
+
+        uint8_t init_F = utils::from_hex(initial_cpu["f"].get<std::string>());
+
+        auto initial_state = State {
+            (uint16_t) utils::from_hex(initial_cpu["pc"].get<std::string>()),
+            (uint16_t) utils::from_hex(initial_cpu["sp"].get<std::string>()),
+
+            (uint8_t) utils::from_hex(initial_cpu["a"].get<std::string>()),
+            (uint8_t) utils::from_hex(initial_cpu["b"].get<std::string>()),
+            (uint8_t) utils::from_hex(initial_cpu["c"].get<std::string>()),
+            (uint8_t) utils::from_hex(initial_cpu["d"].get<std::string>()),
+            (uint8_t) utils::from_hex(initial_cpu["e"].get<std::string>()),
+            (uint8_t) utils::from_hex(initial_cpu["h"].get<std::string>()),
+            (uint8_t) utils::from_hex(initial_cpu["l"].get<std::string>()),
+
+            (bool) (init_F & flag_mask(Flag::Z)),
+            (bool) (init_F & flag_mask(Flag::N)),
+            (bool) (init_F & flag_mask(Flag::C)),
+            (bool) (init_F & flag_mask(Flag::H)),
+            {}
+        };
+
+        for (const auto &m : initial_ram) {
+            uint16_t addr = utils::from_hex(m[0].get<std::string>());
+            uint8_t val = utils::from_hex(m[1].get<std::string>());
+
+            initial_state.mem_delta.push_back(MemoryValue{addr, val});
+        }
+
+        uint8_t final_F = utils::from_hex(final_cpu["f"].get<std::string>());
+
+        auto final_state = State {
+            (uint16_t) utils::from_hex(final_cpu["pc"].get<std::string>()),
+            (uint16_t) utils::from_hex(final_cpu["sp"].get<std::string>()),
+
+            (uint8_t) utils::from_hex(final_cpu["a"].get<std::string>()),
+            (uint8_t) utils::from_hex(final_cpu["b"].get<std::string>()),
+            (uint8_t) utils::from_hex(final_cpu["c"].get<std::string>()),
+            (uint8_t) utils::from_hex(final_cpu["d"].get<std::string>()),
+            (uint8_t) utils::from_hex(final_cpu["e"].get<std::string>()),
+            (uint8_t) utils::from_hex(final_cpu["h"].get<std::string>()),
+            (uint8_t) utils::from_hex(final_cpu["l"].get<std::string>()),
+
+            (bool) (final_F & flag_mask(Flag::Z)),
+            (bool) (final_F & flag_mask(Flag::N)),
+            (bool) (final_F & flag_mask(Flag::C)),
+            (bool) (final_F & flag_mask(Flag::H)),
+            {}
+        };
+
+        for (const auto &m : final_ram) {
+            uint16_t addr = utils::from_hex(m[0].get<std::string>());
+            uint8_t val = utils::from_hex(m[1].get<std::string>());
+
+            final_state.mem_delta.push_back(MemoryValue{addr, val});
+        }
+
+        begin_subtest_suite(name);
+        emu->init(initial_state);
+        expect_state(final_state);
+
+        if (!cycle()) {
+            end_subtest_suite();
+            break;
+        }
+
+        end_subtest_suite();
+    }
+
+    end_test_suite();
+}
+
+void GbE::Test::launch_tests()
 {
     emu->set_PC(0x150);
 
-    begin_test_suit("Loads");
+    begin_test_suite("Loads");
 
-    begin_subtest_suit("ld reg8, d8");
+    begin_subtest_suite("ld reg8, d8");
     test_loads_reg8_d8();
-    end_subtest_suit();
+    end_subtest_suite();
 
-    begin_subtest_suit("ld reg8, reg8");
+    begin_subtest_suite("ld reg8, reg8");
     test_loads_reg8_reg8();
-    end_subtest_suit();
+    end_subtest_suite();
 
-    begin_subtest_suit("ld reg8, (HL)");
+    begin_subtest_suite("ld reg8, (HL)");
     test_loads_reg8_hl();
-    end_subtest_suit();
+    end_subtest_suite();
 
-    begin_subtest_suit("ld (reg16), A");
+    begin_subtest_suite("ld (reg16), A");
     test_loads_aReg16_A();
-    end_subtest_suit();
+    end_subtest_suite();
 
-    end_test_suit();
+    end_test_suite();
 
-    begin_test_suit("Special");
+    begin_test_suite("Special");
 
-    begin_subtest_suit("daa");
+    begin_subtest_suite("daa");
     test_daa();
-    end_subtest_suit();
+    end_subtest_suite();
 
-    end_test_suit();
+    end_test_suite();
 }
 
-void GbTest::test_loads_reg8_d8()
+void GbE::Test::test_loads_reg8_d8()
 {
     uint8_t val = 0x22;
 
     for (int reg_num = 0; reg_num < 8; reg_num++) {
-        auto reg = (GbE::Reg8) reg_num;
-        if (reg == GbE::Reg8::_HL) {       // test ld (HL), d8 separately
+        auto reg = (Reg8) reg_num;
+        if (reg == Reg8::_HL) {       // test ld (HL), d8 separately
             continue;
         }
 
@@ -71,20 +167,20 @@ void GbTest::test_loads_reg8_d8()
     execute(0x2e, 0x00);
 
     // test both as a memory region and a register read
-    expect_reg(GbE::Reg8::_HL, 0xCD);
+    expect_reg(Reg8::_HL, 0xCD);
     expect_val_u8(0xC000, 0xCD);
     // write 0xCD to (HL) which is 0xC000
     execute(0x36, 0xCD);
 }
 
-void GbTest::test_loads_reg8_reg8()
+void GbE::Test::test_loads_reg8_reg8()
 {
     for (int reg_src_num = 0; reg_src_num < 8; reg_src_num++) {
-        auto reg_src = (GbE::Reg8) reg_src_num;
+        auto reg_src = (Reg8) reg_src_num;
         uint8_t val = 0x32 + reg_src_num;
         uint8_t ld_reg8_d8_opcode = 0x6 | (reg_src_num << 3);
 
-        if (reg_src == GbE::Reg8::_HL) {
+        if (reg_src == Reg8::_HL) {
             continue;
         }
 
@@ -92,10 +188,10 @@ void GbTest::test_loads_reg8_reg8()
         execute(ld_reg8_d8_opcode, val);
 
         for (int reg_dest_num = 0; reg_dest_num < 8; reg_dest_num++) {
-            auto reg_dest = (GbE::Reg8) reg_dest_num;
+            auto reg_dest = (Reg8) reg_dest_num;
             uint8_t ld_reg8_reg8_opcode = (0x1 << 6) | (reg_dest_num << 3) | reg_src_num;
 
-            if (reg_dest == GbE::Reg8::_HL) {
+            if (reg_dest == Reg8::_HL) {
                 continue;
             }
 
@@ -106,16 +202,16 @@ void GbTest::test_loads_reg8_reg8()
     }
 }
 
-void GbTest::test_loads_reg8_hl()
+void GbE::Test::test_loads_reg8_hl()
 {
-    auto reg_src = GbE::Reg8::_HL;
+    auto reg_src = Reg8::_HL;
 
     uint8_t ld_hl_d8_opcode = 0x36;
     uint8_t val = 0x50;
 
     // write (HL) to all the registers
     for (int reg_dest_num = 0; reg_dest_num < 8; reg_dest_num++) {
-        auto reg_dest = (GbE::Reg8) reg_dest_num;
+        auto reg_dest = (Reg8) reg_dest_num;
         uint8_t ld_reg8_hl_opcode = (0x1 << 6) | (reg_dest_num << 3) | ((int) reg_src);
 
         if (ld_reg8_hl_opcode == 0x76) {
@@ -123,9 +219,9 @@ void GbTest::test_loads_reg8_hl()
         }
 
         // write address 0xc020 to HL
-        expect_reg(GbE::Reg8::H, 0xc0);
+        expect_reg(Reg8::H, 0xc0);
         execute(0x26, 0xc0); // write to H
-        expect_reg(GbE::Reg8::L, 0x20);
+        expect_reg(Reg8::L, 0x20);
         execute(0x2e, 0x20); // write to L
 
         // test both as a memory region and a register read
@@ -139,120 +235,135 @@ void GbTest::test_loads_reg8_hl()
     }
 }
 
-void GbTest::test_loads_aReg16_A()
+void GbE::Test::test_loads_aReg16_A()
 {
     uint8_t val = 0x55;
     uint16_t addr_bc = 0xc000;
-    expect_reg(GbE::Reg8::A, val);
+    expect_reg(Reg8::A, val);
     execute(0x3E, val); // ld A, 0x55
 
-    expect_reg(GbE::Reg16::BC, addr_bc);
+    expect_reg(Reg16::BC, addr_bc);
     execute(0x01, (uint8_t) addr_bc, (uint8_t) (addr_bc >> 8)); // ld BC, 0xc000
 
-    expect_reg(GbE::Reg8::A, val);
-    expect_reg(GbE::Reg16::BC, addr_bc);
+    expect_reg(Reg8::A, val);
+    expect_reg(Reg16::BC, addr_bc);
     expect_val_u8(addr_bc, val);
     execute(0x02); // ld (BC), A
 
     uint16_t addr_de = 0xc010;
 
-    expect_reg(GbE::Reg16::DE, addr_de);
+    expect_reg(Reg16::DE, addr_de);
     execute(0x11, (uint8_t) addr_de, (uint8_t) (addr_de >> 8)); // ld DE, 0xc010
 
-    expect_reg(GbE::Reg8::A, val);
-    expect_reg(GbE::Reg16::DE, addr_de);
+    expect_reg(Reg8::A, val);
+    expect_reg(Reg16::DE, addr_de);
     expect_val_u8(addr_de, val);
     execute(0x12); // ld (DE), A
 
     uint16_t addr_hl = 0xc020;
 
-    expect_reg(GbE::Reg16::HL, addr_hl);
+    expect_reg(Reg16::HL, addr_hl);
     execute(0x11, (uint8_t) addr_hl, (uint8_t) (addr_hl >> 8)); // ld HL, 0xc000
 
-    expect_reg(GbE::Reg8::A, val);
-    expect_reg(GbE::Reg16::HL, addr_hl + 1);
+    expect_reg(Reg8::A, val);
+    expect_reg(Reg16::HL, addr_hl + 1);
     expect_val_u8(addr_hl, val);
     execute(0x22); // ld (HL+), A
 
-    expect_reg(GbE::Reg8::A, val);
-    expect_reg(GbE::Reg16::HL, addr_hl);
+    expect_reg(Reg8::A, val);
+    expect_reg(Reg16::HL, addr_hl);
     expect_val_u8(addr_hl + 1, val);
     execute(0x32); // ld (HL-), A
 }
 
-void GbTest::test_loads_8bit_other()
+void GbE::Test::test_loads_8bit_other()
 {
 
 }
 
-void GbTest::test_daa()
+void GbE::Test::test_daa()
 {
     struct CALC {
         uint8_t first;
         uint8_t second;
         uint8_t result;
+        bool subtract = false;
     };
 
     std::vector<CALC> vals = {
-        {0x09, 0x01, 0x10},
-        {0x03, 0x06, 0x09},
-        {0x08, 0x08, 0x16},
-        {0x14, 0x08, 0x22}
+        {0x09, 0x01, 0x10, false},
+        {0x03, 0x06, 0x09, false},
+        {0x08, 0x08, 0x16, false},
+        {0x14, 0x08, 0x22, false},
+        {0x57, 0x12, 0x45, true}
     };
 
     for (const auto i : vals) {
-        expect_reg(GbE::Reg8::A, i.first);
+        expect_reg(Reg8::A, i.first);
         execute(0x3E, i.first);
 
-        expect_reg(GbE::Reg8::B, i.second);
+        expect_reg(Reg8::B, i.second);
         execute(0x06, i.second);
 
-        expect_reg(GbE::Reg8::A, i.first + i.second);
-        execute(0x80);
+        if (i.subtract) {
+            expect_reg(Reg8::A, i.first - i.second);
+            expect_flag(Flag::Z, i.first - i.second == 0);
+            expect_flag(Flag::N, true);
+            execute(0x90);
+        } else {
+            expect_reg(Reg8::A, i.first + i.second);
+            expect_flag(Flag::Z, i.first + i.second == 0);
+            expect_flag(Flag::N, false);
+            execute(0x80);
+        }
 
         add_context("A", i.first);
         add_context("B", i.second);
         add_context("Expected", i.result);
 
-        expect_reg(GbE::Reg8::A, i.result); // converted to BCD
-        expect_flag(GbE::Flag::Z, i.result == 0);
-        expect_flag(GbE::Flag::H, 0);
-        expect_flag(GbE::Flag::C, i.result > 0x99);
+        expect_reg(Reg8::A, i.result); // converted to BCD
+        expect_flag(Flag::Z, i.result == 0);
+        expect_flag(Flag::H, 0);
+        expect_flag(Flag::C, i.result > 0x99);
         execute(0x27);
     }
 }
 
-void GbTest::execute(const uint8_t &opcode)
+bool GbE::Test::cycle()
+{
+    emu->execute();
+    bool result = check();
+    cleanup();
+
+    return result;
+}
+
+
+bool GbE::Test::execute(const uint8_t opcode)
 {
     mem[emu->get_PC()] = opcode;
 
-    emu->execute();
-    check();
-    cleanup();
+    return cycle();
 }
 
-void GbTest::execute(const uint8_t &opcode, const uint8_t &arg1)
+bool GbE::Test::execute(const uint8_t opcode, const uint8_t arg1)
 {
     mem[emu->get_PC()] = opcode;
     mem[emu->get_PC() + 1] = arg1;
 
-    emu->execute();
-    check();
-    cleanup();
+    return cycle();
 }
 
-void GbTest::execute(const uint8_t &opcode, const uint8_t &arg1, const uint8_t &arg2)
+bool GbE::Test::execute(const uint8_t opcode, const uint8_t arg1, const uint8_t arg2)
 {
     mem[emu->get_PC()] = opcode;
     mem[emu->get_PC() + 1] = arg1;
     mem[emu->get_PC() + 2] = arg2;
 
-    emu->execute();
-    check();
-    cleanup();
+    return cycle();
 }
 
-void GbTest::check()
+bool GbE::Test::check()
 {
     const std::vector<std::string> flags = {"Z", "N", "C", "H"};
     const std::vector<std::string> regs8 = {"B", "C", "D", "E", "H", "L", "(HL)", "A"};
@@ -262,10 +373,26 @@ void GbTest::check()
 
     int errors = 0;
 
+    if (pc_expected && emu->get_PC() != exp_pc) {
+        errors++;
+        std::cout << std::hex << std::setw(4) << "PC is incorrect: " 
+                  << "expected " << exp_pc << " "
+                  << "got " << emu->get_PC()
+                  << std::dec << std::endl;
+    }
+
+    if (sp_expected && emu->get_SP() != exp_sp) {
+        errors++;
+        std::cout << std::hex << std::setw(4) << "SP is incorrect: " 
+                  << "expected " << exp_sp << " "
+                  << "got " << emu->get_SP()
+                  << std::dec << std::endl;
+    }
+
     for (auto i : exp_flag) {
         if (emu->get_flag(i.flag) != i.val) {
             errors++;
-            std::cout << std::hex << "Flag " << flags[(int) i.flag] << " is incorrect: "
+            std::cout << "Flag " << flags[(int) i.flag] << " is incorrect: "
                     << "expected " << i.val << " "
                     << "got " << (emu->get_flag(i.flag) > 0)
                     << std::endl;
@@ -277,9 +404,9 @@ void GbTest::check()
         if (val != i.val) {
             errors++;
             std::cout << std::hex << "8-bit register " << regs8[(int) i.reg] << " is incorrect: "
-                    << "expected " << (unsigned int) i.val << " "
-                    << "got " << (unsigned int) val
-                    << std::endl;
+                      << "expected " << (unsigned int) i.val << " "
+                      << "got " << (unsigned int) val
+                      << std::dec << std::endl;
         }
     }
 
@@ -288,9 +415,9 @@ void GbTest::check()
         if (val != i.val) {
             errors++;
             std::cout << std::hex << "16-bit register " << regs16[(int) i.reg] << " is incorrect: "
-                    << "expected " << (unsigned int) i.val << " "
-                    << "got " << (unsigned int) val
-                    << std::endl;
+                      << "expected " << (unsigned int) i.val << " "
+                      << "got " << (unsigned int) val
+                      << std::dec << std::endl;
         }
     }
 
@@ -299,32 +426,32 @@ void GbTest::check()
         if (val != i.val) {
             errors++;
             std::cout << std::hex << "16-bit register " << regs16_sp[(int) i.reg] << " is incorrect: "
-                    << "expected " << (unsigned int) i.val << " "
-                    << "got " << (unsigned int) val
-                    << std::endl;
+                      << "expected " << (unsigned int) i.val << " "
+                      << "got " << (unsigned int) val
+                      << std::dec << std::endl;
         }
     }
 
     for (auto i : exp_val_u8) {
-        auto val = emu->read_memory(i.addr);
+        auto val = emu->peek_memory(i.addr);
         if (val != i.val) {
             errors++;
             std::cout << std::hex << "8-bit unsigned value at " << i.addr << " is incorrect: "
-                    << "expected " << (unsigned int) i.val << " "
-                    << "got " << (unsigned int) val
-                    << std::endl;
+                      << "expected " << (unsigned int) i.val << " "
+                      << "got " << (unsigned int) val
+                      << std::dec << std::endl;
         }
     }
 
     for (const auto &i : exp_val_s8) {
-        auto val = emu->read_memory(i.addr);
+        auto val = emu->peek_memory(i.addr);
         if (val != i.val) {
             errors++;
             std::cout << std::hex << "8-bit signed value at " << i.addr << " is incorrect: "
-                    << std::dec
-                    << "expected " << (int) i.val << " "
-                    << "got " << (int) val
-                    << std::endl;
+                      << std::dec
+                      << "expected " << (int) i.val << " "
+                      << "got " << (int) val
+                      << std::endl;
         }
     }
 
@@ -349,10 +476,15 @@ void GbTest::check()
                       << (int) i.val << std::dec << "\n";
         }
     }
+
+    return errors <= 0;
 }
 
-void GbTest::cleanup()
+void GbE::Test::cleanup()
 {
+    pc_expected = false;
+    sp_expected = false;
+
     exp_reg8 = {};
     exp_reg16 = {};
     exp_reg16_sp = {};
@@ -368,86 +500,121 @@ void GbTest::cleanup()
     context_s8 = {};
 }
 
-void GbTest::begin_test_suit(const std::string &name)
+void GbE::Test::begin_test_suite(const std::string &name)
 {
-    subtest_suit = "";
-    subtest_suit_num = 0;
+    subtest_suite = "";
+    subtest_suite_num = 0;
 
-    test_suit = name;
-    test_suit_num += 1;
+    test_suite = name;
+    test_suite_num += 1;
 
-    std::cout << "TEST SUIT BEGIN\t[ " << test_suit_num << " | " << test_suit << "]" << std::endl;
+    std::cout << "TEST suite BEGIN\t[ " << test_suite_num << " | " << test_suite << "]" << std::endl;
 }
 
-void GbTest::end_test_suit()
+void GbE::Test::end_test_suite()
 {
-    std::cout << "TEST SUIT END" << std::endl;
+    std::cout << "TEST suite END" << std::endl;
 }
 
-void GbTest::begin_subtest_suit(const std::string &name)
+void GbE::Test::begin_subtest_suite(const std::string &name)
 {
-    subtest_suit = name;
-    subtest_suit_num += 1;
+    subtest_suite = name;
+    subtest_suite_num += 1;
 
-    std::cout << "SUBTEST SUIT BEGIN\t[ " << subtest_suit_num << " | " << subtest_suit << " ]" << std::endl;
+    std::cout << "SUBTEST suite BEGIN\t[ " << subtest_suite_num << " | " << subtest_suite << " ]" << std::endl;
 }
 
-void GbTest::end_subtest_suit()
+void GbE::Test::end_subtest_suite()
 {
-    std::cout << "SUBTEST SUIT END" << std::endl;
+    std::cout << "SUBTEST suite END" << std::endl;
 }
 
-void GbTest::expect_flag(const GbE::Flag &flag, const bool &val)
+void GbE::Test::expect_state(const State &state)
+{
+    expect_pc(state.PC);
+    expect_sp(state.SP);
+
+    expect_reg(Reg8::A, state.A);
+    expect_reg(Reg8::B, state.B);
+    expect_reg(Reg8::C, state.C);
+    expect_reg(Reg8::D, state.D);
+    expect_reg(Reg8::E, state.E);
+    expect_reg(Reg8::H, state.H);
+    expect_reg(Reg8::L, state.L);
+
+    expect_flag(Flag::Z, state.fZ);
+    expect_flag(Flag::N, state.fN);
+    expect_flag(Flag::C, state.fC);
+    expect_flag(Flag::H, state.fH);
+
+    for (const auto &m : state.mem_delta) {
+        expect_val_u8(m.addr, m.val);
+    }
+}
+
+void GbE::Test::expect_pc(const uint16_t pc)
+{
+    exp_pc = pc;
+    pc_expected = true;
+}
+
+void GbE::Test::expect_sp(const uint16_t sp)
+{
+    exp_sp = sp;
+    sp_expected = true;
+}
+
+void GbE::Test::expect_flag(const Flag flag, const bool val)
 {
     exp_flag.push_back({flag, val});
 }
 
-void GbTest::expect_val_u8(const uint16_t &addr, const uint8_t &val)
+void GbE::Test::expect_val_u8(const uint16_t addr, const uint8_t val)
 {
     exp_val_u8.push_back({addr, val});
 }
 
-void GbTest::expect_val_s8(const uint16_t &addr, const int8_t &val)
+void GbE::Test::expect_val_s8(const uint16_t addr, const int8_t val)
 {
     exp_val_s8.push_back({addr, val});
 }
 
-/*void GbTest::expect_val_u16(const uint16_t &addr, const uint16_t &val)
+/*void GbTest::expect_val_u16(const uint16_t addr, const uint16_t val)
 {
     exp_val_u16.push_back({addr, val});
 }
 
-void GbTest::expect_val_s16(const uint16_t &addr, const int16_t &val)
+void GbTest::expect_val_s16(const uint16_t &addr, const int16_t val)
 {
     exp_val_s16.push_back({addr, val});
 }*/
 
-void GbTest::expect_reg(const GbE::Reg8 &reg, const uint8_t &val)
+void GbE::Test::expect_reg(const Reg8 reg, const uint8_t val)
 {
     exp_reg8.push_back({reg, val});
 }
 
-void GbTest::expect_reg(const GbE::Reg16 &reg, const uint16_t &val)
+void GbE::Test::expect_reg(const Reg16 reg, const uint16_t val)
 {
     exp_reg16.push_back({reg, val});
 }
 
-void GbTest::expect_reg(const GbE::Reg16_SP &reg, const uint16_t &val)
+void GbE::Test::expect_reg(const Reg16_SP reg, const uint16_t val)
 {
     exp_reg16_sp.push_back({reg, val});
 }
 
-void GbTest::add_context(const std::string name, const uint8_t &val)
+void GbE::Test::add_context(const std::string name, const uint8_t val)
 {
     context_u8.push_back( {name, val} );
 }
 
-void GbTest::add_context(const std::string name, const int8_t &val)
+void GbE::Test::add_context(const std::string name, const int8_t val)
 {
     context_s8.push_back( {name, val} );
 }
 
-/*void GbTest::expect_reg(const GbE::Reg16_Addr &reg, const uint16_t &val)
+/*void GbTest::expect_reg(const Reg16_Addr reg, const uint16_t val)
 {
     exp_reg16_addr.push_back({reg, val});
 }*/
