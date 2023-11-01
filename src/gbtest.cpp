@@ -527,6 +527,8 @@ void GbE::Test::cleanup()
 
     context_u8 = {};
     context_s8 = {};
+
+    emu->resume();
 }
 
 void GbE::Test::begin_test_suite(const std::string &name)
