@@ -73,7 +73,7 @@ bool breakpoint_reached = false;
 bool output_instr = true;
 bool testing_mode = true;
 
-int cycles_per_frame = 50000;
+int cycles_per_frame = 17477;
 
 uint64_t cycles = 0;
 
@@ -81,7 +81,7 @@ GbE::CPU *emu;
 
 bool is_active()
 {
-    return cycling_enabled && !breakpoint_reached && !emu->isStopped() && !emu->isHalted();
+    return cycling_enabled && !breakpoint_reached && !emu->isStopped();
 }
 
 std::string read_text_file(const std::string &path)
@@ -118,10 +118,8 @@ uint8_t* read_binary_file(const std::string &path, size_t *size)
     return ptr;
 }
 
-bool emu_cycle()
+bool emu_check()
 {
-    emu->execute();
-
     if (use_breakpoints) {
         uint16_t pc = emu->get_PC();
 
@@ -151,12 +149,7 @@ bool emu_cycle()
         }
     }
 
-    cycles++;
-
-    if (emu->isHalted()) [[unlikely]] {
-        std::cout << "Received HALT" << std::endl;
-        return false;
-    } else if (emu->isStopped()) {
+    if (emu->isStopped()) {
         //std::cout << "Received STOP" << std::endl;
         return false;
     }
@@ -230,7 +223,9 @@ void debugger_main()
     } else {
         if (ImGui::Button("Cycle")) {
             cycling_enabled = false;
-            emu_cycle();
+            cycles += emu->execute();
+
+            emu_check();
         }
         if (ImGui::Button("Resume")) {
             emu->resume();
@@ -262,6 +257,7 @@ void debugger_main()
 void debugger_breakpoints()
 {
     if (!ImGui::Begin("Breakpoints")) {
+        ImGui::End();
         return;
     }
 
@@ -300,6 +296,7 @@ void debugger_breakpoints()
 void debugger_fps_counter()
 {
     if (!ImGui::Begin("FPS")) {
+        ImGui::End();
         return;
     }
 
@@ -311,6 +308,7 @@ void debugger_program_listing()
 {
     if (!ImGui::Begin("Assembly Listing")) {
         output_instr = false;
+        ImGui::End();
         return;
     }
 
@@ -357,8 +355,10 @@ void debugger_program_listing()
 
 void debugger_hex_viewer()
 {
-    if (!ImGui::Begin("Hex Viewer"))
+    if (!ImGui::Begin("Hex Viewer")) {
+        ImGui::End();
         return;
+    }
 
     std::string current_preview = "Choose memory region to display";
 
@@ -434,6 +434,7 @@ void debugger_hex_viewer()
 void debugger_stack_viewer()
 {
     if (!ImGui::Begin("Stack Viewer")) {
+        ImGui::End();
         return;
     }
 
@@ -560,8 +561,11 @@ int main()
     ImGui_ImplSDLRenderer2_Init(renderer);
 
     emu = new GbE::CPU();
-    start_unit_tests();
-    emu->reset();
+
+    if (false) {
+        start_unit_tests();
+        emu->reset();
+    }
 
     char const * json_directory = tinyfd_selectFolderDialog(
         "Open the folder containing JSON tests",
@@ -569,7 +573,7 @@ int main()
     );
 
     if (json_directory != NULL) {
-        start_json_tests(json_directory);
+        start_json_tests(json_directory, 0x76);
         emu->reset();
     } else {
         std::cout << "Skipping JSON tests" << std::endl;
@@ -608,6 +612,13 @@ int main()
     auto rom = read_binary_file(rom_filename, &rom_size);
     emu->load_rom(rom_size, rom);
 
+    SDL_Texture *frame_buffer = SDL_CreateTexture(renderer, SDL_PixelFormatEnum::SDL_PIXELFORMAT_RGBX8888, 
+                                                  SDL_TextureAccess::SDL_TEXTUREACCESS_STATIC, 160, 144);
+    
+    //SDL_Surface *surface = SDL_CreateRGBSurfaceWithFormat(0, 160, 144, 8, SDL_PixelFormatEnum::SDL_PIXELFORMAT_RGB888);
+    
+    SDL_Rect dest_rect = {0, 0, 160 * 2, 144 * 2};
+
     SDL_Event e;
     bool quit = false;
     while (!quit){
@@ -636,15 +647,46 @@ int main()
         debugger_program_listing();
         debugger_stack_viewer();
 
-        for (int i = 0; i < cycles_per_frame && is_active(); i++) {
-            if (!emu_cycle()) {
-                break;
+        ImGui::Render();
+
+        int frame_cycle = 0;
+        while (frame_cycle < cycles_per_frame && !emu->is_frame_ready() && is_active()) {
+            int used_cycles = emu->execute();
+
+            frame_cycle += used_cycles;
+            cycles += used_cycles;
+
+            emu_check();
+        }
+
+        if (emu->is_frame_ready()) {
+            int pitch = 160 * 4;
+            uint8_t* frame_pixels = emu->acquire_frame();
+
+            for (int i = 0; i < 160 * 144; i++) {
+                uint8_t r = frame_pixels[i * 4];
+                uint8_t g = frame_pixels[(i * 4) + 1];
+                uint8_t b = frame_pixels[(i * 4) + 2];
+
+                if (r != g || r != b) {
+                    std::cout << "why: " << utils::to_hex(r, 2) 
+                                + " " + utils::to_hex(g, 2) 
+                                + " " + utils::to_hex(b, 2) << std::endl;
+                }
+            }
+
+            if (SDL_UpdateTexture(frame_buffer, NULL, frame_pixels, pitch)) {
+                std::cout << "error: " << SDL_GetError << std::endl;
+                return -1;
             }
         }
 
-        ImGui::Render();
-
         SDL_RenderClear(renderer);
+        if (SDL_RenderCopy(renderer, frame_buffer, NULL, &dest_rect)) {
+            std::cout << "error: " << SDL_GetError << std::endl;
+            return -1;
+        }
+
         ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData());
         SDL_RenderPresent(renderer);
     }
