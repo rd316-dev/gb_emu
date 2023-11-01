@@ -19,6 +19,25 @@ enum class CF {Z, C}; // zero or carry
 
 enum class Flag {Z=0, N=1, H=2, C=3};
 
+enum class LcdControl {
+    BgWindowEnable = 0,
+    ObjEnable = 1,
+    ObjSize = 2,
+    BgTileMap = 3,
+    BgWindowTiles = 4,
+    WindowEnable = 5,
+    WindowTileMap = 6,
+    LcdPpuEnable = 7
+};
+
+enum class Interrupt {
+    VBlank = 0,
+    STAT   = 1,
+    Timer  = 2,
+    Serial = 3,
+    Joypad = 4
+};
+
 struct MemoryValue {
     uint16_t addr;
     uint8_t val;
@@ -61,18 +80,8 @@ struct CartidgeHeader {
     uint16_t global_checksum;
 };
 
-struct LcdControl {
-    bool lcd_ppu_enabled;
-    bool window_tile_map_area;
-    bool window_enabled;
-    bool bg_window_tile_data_area;
-    bool bg_tile_map_area;
-    bool obj_size;
-    bool obj_enable;
-    bool priority;
-};
-
 uint8_t flag_mask(Flag flag, bool val = true);
+uint8_t lcdc_mask(LcdControl control, bool val = true);
 
 class CPU
 {
@@ -80,20 +89,25 @@ public:
     CPU();
     ~CPU();
 
+    bool is_frame_ready() const;
+    uint8_t* acquire_frame();
+
     void use_testing_memory();
     void init(const State &state);
 
     void resume();
     void reset();
-    void execute_sequence(const std::vector<uint8_t> &bytes);
+
+    void request_interrupt(Interrupt interrupt);
 
     void load_boot_rom(const size_t &size, uint8_t* boot_rom);
     void load_rom     (const size_t &size, uint8_t* rom);
-    void execute();
 
-    uint8_t ppu_cycle();
+    int execute();
+
+    void m_cycle();
+    void ppu_cycle();
     void timer_cycle();
-    void execute_for(int machine_cycles);
 
     uint16_t get_last_PC() const;
     uint8_t  get_last_opcode() const;
@@ -115,15 +129,17 @@ public:
     void    set_flag(const Flag flag, const bool val);
     uint8_t get_flag(const Flag flag) const;
 
-    uint8_t peek_memory(const uint16_t addr) const;
-
     uint8_t  read_register8(const Reg8 reg);
     uint16_t read_register16(const Reg16 reg) const;
     uint16_t read_register16(const Reg16_SP reg) const;
 
+    uint8_t peek_memory(const uint16_t addr) const;
+    void change_memory(const uint16_t addr, const uint8_t val);
+
 protected:
     uint8_t read_memory(const uint16_t addr);
     void write_memory(const uint16_t addr, const uint8_t val);
+
     void write_register8(const Reg8 reg, const uint8_t val);
     void write_register16(const Reg16 reg, const uint16_t val);
     void write_register16(const Reg16_SP reg, const uint16_t val);
@@ -325,9 +341,20 @@ private:
     uint32_t bg_fifo  = 0;
     uint32_t oam_fifo = 0;
 
-    LcdControl lcdc = {0,0,0,0,0,0,0,0};
+    uint8_t lcdc = 0x00;
 
-    uint8_t interrupt_enabled = 0x01;
+    int interrupt_start_state = 0;
+
+    bool ime_set = false;
+    bool ime_planned = false;
+
+    uint8_t interrupt_master_enable = 0x00;
+    uint8_t interrupt_enable = 0x00;
+    uint8_t interrupt_flag = 0x00;
+
+    uint16_t interrupt_addr = 0x00;
+
+    bool vblank_interrupt_requested = false;
 
     int fetcher_y = 0;
     int fetcher_x = 0;
@@ -336,6 +363,8 @@ private:
     int fetcher_step = 0;
 
     uint16_t fetcher_addr = 0;
+    uint16_t bg_map_addr = 0;
+    uint16_t window_map_addr = 0;
 
     bool stopped = false;
     bool halted  = false;
@@ -351,8 +380,6 @@ private:
 
     //uint8_t current_bank    = 0;
     //uint8_t secondary_bank  = 0;
-
-    bool enable_interrupts;
 
     uint64_t machine_cycle  = 0;
     int used_cycles         = 0;
@@ -384,9 +411,12 @@ private:
     std::function<void()> itab[256];
     std::function<void()> cbtab[256];
 
-    uint16_t frame_buffer_1[160*144] = {};
-    uint16_t frame_buffer_2[160*144] = {};
-    uint16_t* current_frame_buffer = frame_buffer_1;
+    uint8_t frame_buffer_1[160*144*4] = {};
+    uint8_t frame_buffer_2[160*144*4] = {};
+    uint8_t* active_frame_buffer = frame_buffer_1;
+    uint8_t* displaying_frame_buffer = frame_buffer_2;
+
+    bool frame_ready = false;
 
     uint8_t* wram = nullptr;
     uint8_t* vram = nullptr;

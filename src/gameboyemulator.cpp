@@ -14,105 +14,6 @@ void unimplemented(const std::string &name)
     std::cout << name << " is unimplemented" << std::endl;
 }
 
-uint8_t GbE::flag_mask(Flag flag, bool val)
-{
-    return val << (7 - (uint8_t) flag);
-}
-
-GbE::CPU::CPU()
-{
-    init_instruction_table();
-    init_cb_instruction_table();
-
-    mapper = MemoryMapper();
-
-    vram = (uint8_t*) malloc(0x2000);
-    wram = (uint8_t*) malloc(0x2000);
-    external_ram = (uint8_t*) malloc(0x2000);
-    oam  = (uint8_t*) malloc(0xA0);
-    hram = (uint8_t*) malloc(0x7F);
-}
-
-GbE::CPU::~CPU()
-{
-    free(vram);
-    free(wram);
-    free(external_ram);
-    free(oam);
-    free(hram);
-    free(testing_memory);
-}
-
-void GbE::CPU::use_testing_memory()
-{
-    testing_memory = (uint8_t*) malloc(0x10000);
-}
-
-void GbE::CPU::init(const State &data)
-{
-    PC = data.PC;
-    SP = data.SP;
-
-    write_register8(Reg8::A, data.A);
-    write_register8(Reg8::B, data.B);
-    write_register8(Reg8::C, data.C);
-    write_register8(Reg8::D, data.D);
-    write_register8(Reg8::E, data.E);
-    write_register8(Reg8::H, data.H);
-    write_register8(Reg8::L, data.L);
-    set_flag(Flag::Z, data.fZ);
-    set_flag(Flag::N, data.fN);
-    set_flag(Flag::C, data.fC);
-    set_flag(Flag::H, data.fH);
-
-    for (const auto &m : data.mem_delta) {
-        write_memory(m.addr, m.val);
-    }
-}
-
-void GbE::CPU::resume()
-{
-    stopped = false;
-    halted = false;
-}
-
-void GbE::CPU::reset()
-{
-    SP = 0;
-    PC = 0;
-
-    machine_cycle = 0;
-    used_cycles = 0;
-
-    last_PC = 0;
-    last_opcode = 0;
-    last_cb_opcode = 0;
-
-    scy = 0;
-    scx = 0;
-
-    lcdc = {0,0,0,0,0,0,0,0};
-    interrupt_enabled = 0x01;
-
-    fetcher_y = 0;
-    fetcher_x = 0;
-
-    current_dot  = 0;
-    fetcher_step = 0;
-
-    vram_accessible = true;
-    oam_accessible  = true;
-    boot_rom_mapped = true;
-
-    stopped = false;
-    halted  = false;
-
-    dma_started = false;
-
-    free(testing_memory);
-    testing_memory = nullptr;
-}
-
 std::string GbE::CPU::get_inst() const
 {
     return debug_current_inst;
@@ -258,6 +159,127 @@ void GbE::CPU::debug_push_custom_arg(const std::string &arg)
     #endif
 }
 
+uint8_t GbE::flag_mask(Flag flag, bool val)
+{
+    return val << (7 - (uint8_t) flag);
+}
+
+uint8_t GbE::lcdc_mask(LcdControl control, bool val)
+{
+    return val << ((uint8_t) control);
+}
+
+GbE::CPU::CPU()
+{
+    init_instruction_table();
+    init_cb_instruction_table();
+
+    mapper = MemoryMapper();
+
+    vram = (uint8_t*) malloc(0x2000);
+    wram = (uint8_t*) malloc(0x2000);
+    external_ram = (uint8_t*) malloc(0x2000);
+    oam  = (uint8_t*) malloc(0xA0);
+    hram = (uint8_t*) malloc(0x7F);
+}
+
+GbE::CPU::~CPU()
+{
+    free(vram);
+    free(wram);
+    free(external_ram);
+    free(oam);
+    free(hram);
+    free(testing_memory);
+}
+
+bool GbE::CPU::is_frame_ready() const
+{
+    return frame_ready;
+}
+
+uint8_t* GbE::CPU::acquire_frame()
+{
+    frame_ready = false;
+    return displaying_frame_buffer;
+}
+
+void GbE::CPU::use_testing_memory()
+{
+    testing_memory = (uint8_t*) malloc(0x10000);
+}
+
+void GbE::CPU::init(const State &data)
+{
+    PC = data.PC;
+    SP = data.SP;
+
+    write_register8(Reg8::A, data.A);
+    write_register8(Reg8::B, data.B);
+    write_register8(Reg8::C, data.C);
+    write_register8(Reg8::D, data.D);
+    write_register8(Reg8::E, data.E);
+    write_register8(Reg8::H, data.H);
+    write_register8(Reg8::L, data.L);
+    set_flag(Flag::Z, data.fZ);
+    set_flag(Flag::N, data.fN);
+    set_flag(Flag::C, data.fC);
+    set_flag(Flag::H, data.fH);
+
+    for (const auto &m : data.mem_delta) {
+        write_memory(m.addr, m.val);
+    }
+}
+
+void GbE::CPU::resume()
+{
+    stopped = false;
+    halted = false;
+}
+
+void GbE::CPU::reset()
+{
+    SP = 0;
+    PC = 0;
+
+    machine_cycle = 0;
+    used_cycles = 0;
+
+    last_PC = 0;
+    last_opcode = 0;
+    last_cb_opcode = 0;
+
+    scy = 0;
+    scx = 0;
+
+    lcdc = 0;
+    interrupt_master_enable = 0x01;
+
+    fetcher_y = 0;
+    fetcher_x = 0;
+
+    current_dot  = 0;
+    fetcher_step = 0;
+
+    vram_accessible = true;
+    oam_accessible  = true;
+    boot_rom_mapped = true;
+
+    stopped = false;
+    halted  = false;
+
+    dma_started = false;
+
+    free(testing_memory);
+    testing_memory = nullptr;
+}
+
+void GbE::CPU::request_interrupt(Interrupt interrupt)
+{
+    uint8_t mask = 1 << ((uint8_t) interrupt);
+    interrupt_flag = interrupt_flag | mask;
+}
+
 void GbE::CPU::load_boot_rom(const size_t &size, uint8_t* boot_rom)
 {
     if (size < 0xFF) {
@@ -315,46 +337,108 @@ void GbE::CPU::load_rom(const size_t &size, uint8_t* rom)
     }
 }
 
-void GbE::CPU::execute()
+int GbE::CPU::execute()
 {
     stopped = false;
-    halted = false;
 
     used_cycles = 0;
-    last_PC = PC;
 
-    uint8_t inst = fetch();
-    last_opcode = inst;
+    uint8_t available_interrupts = interrupt_enable & interrupt_flag;
+    if (interrupt_master_enable && available_interrupts) [[unlikely]] {
+        interrupt_master_enable = 0x0;
+        interrupt_start_state = 1;
 
-    itab[inst]();
-
-    machine_cycle += used_cycles;
-    int used = used_cycles;
-
-    if (dma_started) [[unlikely]] {
-        dma_cycle(used);
-    }
-
-    if (lcdc.lcd_ppu_enabled) [[likely]] {
-        for (int i = 0; i < (used << 2);) {
-            int ret = ppu_cycle();
-            current_dot += ret;
-            i += ret;
+        if (available_interrupts & 0x01) {
+            available_interrupts ^= 0x01;
+            interrupt_addr = 0x40;
+        } else if (available_interrupts & 0x02) {
+            available_interrupts ^= 0x02;
+            interrupt_addr = 0x48;
+        } else if (available_interrupts & 0x04) {
+            available_interrupts ^= 0x04;
+            interrupt_addr = 0x50;
+        } else if (available_interrupts & 0x08) {
+            available_interrupts ^= 0x08;
+            interrupt_addr = 0x58;
+        } else if (available_interrupts & 0x10) {
+            available_interrupts ^= 0x10;
+            interrupt_addr = 0x60;
         }
     }
 
-    if (enable_interrupts) {
-        enable_interrupts = false;
-        interrupt_enabled = 0x0F;
+    if (interrupt_start_state <= 0) [[likely]] {
+        if (!halted) [[likely]] {
+            last_PC = PC;
+
+            uint8_t inst = fetch();
+            last_opcode = inst;
+
+            itab[inst]();
+        } else {
+            m_cycle();
+        }
+    } else {
+        halted = false;
+
+        switch (interrupt_start_state) {
+            case 1:
+            case 2:
+                m_cycle();
+                interrupt_start_state++;
+                break;
+            case 3:
+                push16(PC);
+
+                interrupt_start_state++;
+                break;
+            case 4:
+                PC = interrupt_addr;
+
+                m_cycle();
+                interrupt_start_state = 0;
+                break;
+        }
     }
 
-    timer_cycle();
+    machine_cycle += used_cycles;
+
+    if (dma_started) [[unlikely]] {
+        dma_cycle(used_cycles);
+    }
+
+    if (ime_planned) [[unlikely]] {
+        interrupt_master_enable = 0x01;
+        ime_set = false;
+        ime_planned = false;
+    }
+
+    if (ime_set) [[unlikely]] {
+        ime_planned = true;
+    }
+
+    return used_cycles;
+}
+
+void GbE::CPU::m_cycle()
+{
+    used_cycles++;
+
+    if (!halted) {
+        timer_cycle();
+    }
+
+    if (lcdc & lcdc_mask(LcdControl::LcdPpuEnable)) [[likely]] {
+        ppu_cycle();
+        ppu_cycle();
+        ppu_cycle();
+        ppu_cycle();
+    }
 }
 
 void GbE::CPU::timer_cycle()
 {
     // prevent the branching by using binary operations
-    div_counter += used_cycles;
+    div_counter++;
 
     uint8_t mask = 0x40;
     uint8_t increment = (div_counter & mask) >> 6;
@@ -365,93 +449,128 @@ void GbE::CPU::timer_cycle()
     // reset the counter if it's equal to 64
     div_counter = div_counter ^ mask;
 
-    // increment TIMA if the counter is equal to 64 and the timer is enabled
     if (tac & 0x04) [[unlikely]] {
-        timer_counter += used_cycles;
+        timer_counter++;
         if (timer_counter >= timer_freq) {
             tima++;
             timer_counter = 0;
 
             if (tima == 0) [[unlikely]] {
                 tima = tma;
-                // todo: trigger the interrupt
+                request_interrupt(Interrupt::Timer);
             }
         }
     }
 }
 
-void GbE::CPU::execute_for(int memory_cycles)
-{
-    int total_cycles = 0;
-
-    while (total_cycles < memory_cycles) {
-        execute();
-
-        total_cycles += used_cycles;
-    }
-}
-
-uint8_t GbE::CPU::ppu_cycle()
+void GbE::CPU::ppu_cycle()
 {
     int current_scanline = current_dot / 456;
     int scanline_dot = current_dot % 456;
 
+    if (current_scanline > LY) {
+        int i = 0;
+        i += 1;
+    }
+
     LY = current_scanline;
 
-    STAT = STAT | ((LY == LYC) << 2);
+    uint8_t stat_mask = 1 << 2;
+    uint8_t stat_val_mask = (LY == LYC) << 2;
+
+    STAT = (STAT ^ stat_mask) & stat_val_mask;
+
+    if (stat_val_mask && (STAT & 0x40)) {
+        request_interrupt(Interrupt::STAT);
+    }
 
     if (current_scanline <= 143) {
-        if (scanline_dot <= 80) {
+        vblank_interrupt_requested = false;
+
+        if (scanline_dot < 80) { // mode 2
             // oam scan
-        }
+        } else if (scanline_dot < 240) { // mode 3
+            int pixel_x = (scanline_dot) - 80;
 
-        if (fetcher_step == 0) {
-            bool inside_window_x = (fetcher_x * 8) >= wx && lcdc.window_enabled;
-            bool inside_window_y = (fetcher_y * 8) >= wy && lcdc.window_enabled;
-
-            fetcher_addr = 0x9800;
-
-            if (inside_window_x && lcdc.window_tile_map_area)
-                fetcher_addr = 0x9C00;
-
-            if (!inside_window_x && lcdc.bg_tile_map_area)
-                fetcher_addr = 0x9C00;
-
-            int x = 0;
-
-            if (inside_window_x && inside_window_y) {
-                // todo: I don't understand
-                // x =
+            uint16_t bg_map_addr = 0;
+            if (lcdc & lcdc_mask(LcdControl::BgTileMap)) {
+                bg_map_addr = 0x9C00;
             } else {
-                x = ((scx / 8) + fetcher_x) & 0x1F;
+                bg_map_addr = 0x9800;
             }
 
-            return 2;
-        } else if (fetcher_step == 1) {
-            uint8_t data_low = read_memory(fetcher_addr);
+            uint16_t bg_data_addr = 0;
+            if (lcdc & lcdc_mask(LcdControl::BgWindowTiles)) {
+                bg_data_addr = 0x8000;
+            } else {
+                bg_data_addr = 0x8800;
+            }
 
-            return 2;
-        } else if (fetcher_step == 2) {
-            uint8_t data_high = read_memory(fetcher_addr + 1);
+            // find the index of the tile
+            uint8_t tile_map_x = ((pixel_x + scx) >> 3);
+            uint8_t tile_map_y = ((current_scanline + scy) >> 3);
 
-            return 2;
-        } else if (fetcher_step == 3) {
+            uint16_t tile_map_addr = bg_map_addr + (tile_map_y << 5) + tile_map_x;
+            uint8_t tile_data_index = peek_memory(tile_map_addr);
 
-            return 2;
-        } else if (fetcher_step == 4) {
+            // find the data of the tile
+            uint16_t tile_data_addr = bg_data_addr + (tile_data_index << 4) + (((current_scanline + scy) & 0xF8) << 1);
 
-            return 1;
+            uint8_t tile_low = peek_memory(tile_data_addr);
+            uint8_t tile_high = peek_memory(tile_data_addr + 1);
+
+            // get color of the pixel
+            uint8_t inner_tile_x = (7 - ((pixel_x + scx) & 0x07));
+            uint8_t mask = 1 << inner_tile_x;
+
+            uint8_t palette_index = (((tile_high & mask) << 1) + (tile_low & mask)) >> inner_tile_x;
+            uint8_t palette_val = (bgp >> (palette_index << 1)) & 0x02;
+
+            // convert to Grayscale to RGB
+            uint8_t grayscale = 0;
+
+            if (palette_val == 0) {
+                grayscale = 0xFF;
+            } else if (palette_val == 1) {
+                grayscale = 0xF0;
+            } else if (palette_val == 2) {
+                grayscale = 0x0F;
+            } else if (palette_val == 3) {
+                grayscale = 0x00;
+            }
+
+            int pixel_addr = ((LY * 160) + pixel_x) * 4;
+
+            active_frame_buffer[pixel_addr] = grayscale;
+            active_frame_buffer[pixel_addr + 1] = grayscale;
+            active_frame_buffer[pixel_addr + 2] = grayscale;
+            active_frame_buffer[pixel_addr + 3] = 0xff;
+        } else if (scanline_dot < 252) {
+            // whatever
+        } else { // mode 0
+            // hblank
         }
-    } else {
-        return 1;
-        // vblank
+    } else if (current_scanline <= 153) { // mode 1
+        if (!vblank_interrupt_requested) {
+            request_interrupt(Interrupt::VBlank);
+            vblank_interrupt_requested = true;
+
+            frame_ready = true;
+
+            std::swap(active_frame_buffer, displaying_frame_buffer);
+        }
+    }
+
+    current_dot++;
+    if (current_dot > 70224) {
+        current_dot = 0;
     }
 }
 
 void GbE::CPU::dma_cycle(const uint8_t &machine_cycles)
 {
     for (int i = 0; i < machine_cycles; i++) {
-        write_memory(dma_dest_addr, read_memory(dma_src_addr));
+        change_memory(dma_dest_addr, peek_memory(dma_src_addr));
         dma_src_addr++;
         dma_dest_addr++;
 
@@ -496,66 +615,62 @@ uint8_t GbE::CPU::peek_memory(const uint16_t addr) const
     } 
     else if (addr <= 0xFEFF) return 0xFF; // not usable
     else if (addr <= 0xFF7F) {
-        if (addr <= 0xFF00) {
-            // joypad
-            return 0x3F;
-        } else if (addr <= 0xFF02) {
-            // serial transfer
-        } else if (addr <= 0xFF07) {
-            if (addr == 0xFF40) {
-                return div;
-            }
-            // timer and divider
+        if (addr == 0xFF00) {
+            return 0x3F; // joypad
+        } else if (addr == 0xFF01) {
+            return spi_byte;
+        } else if (addr == 0xFF02) {
+            return spi_control;
+        } else if (addr == 0xFF04) {
+            return div;
+        } else if (addr == 0xFF05) {
+            return tima;
+        } else if (addr == 0xFF06) {
+            return tma;  
+        } else if (addr == 0xFF07) {
+            return tac;
+        } else if (addr == 0xFF0F) {
+            return interrupt_flag;
         } else if (addr <= 0xFF26) {
             // audio
         } else if (addr <= 0xFF3F) {
             // wave pattern
-        } else if (addr <= 0xFF4B) {
-            if (addr == 0xFF41) {
-                return STAT;
-            } else if (addr == 0xFF42) {
-                // scy
-            } else if (addr == 0xFF43) {
-                // scx
-            } else if (addr == 0xFF44) {
-                return LY;
-            } else if (addr == 0xFF45) {
-                return LYC;
-            } else if (addr == 0xFF46) {
-                return dma_src_addr;
-            }
-            // lcd
-        } else if (addr <= 0xFF4F) {
-            // [cgb] vram bank select
-        } else if (addr <= 0xFF50) {
-            // disable boot rom
-        } else if (addr <= 0xFF55) {
-            // [cgb] vram dma
-        } else if (addr <= 0xFF69) {
-            // [cgb] bg/obj palettes
-        } else if (addr <= 0xFF70) {
-            // [cgb] wram bank select
+        } else if (addr == 0xFF40) {
+            return lcdc;
+        } else if (addr == 0xFF41) {
+            return STAT;
+        } else if (addr == 0xFF42) {
+            return scy;
+        } else if (addr == 0xFF43) {
+            return scx;
+        } else if (addr == 0xFF44) {
+            return LY;
+        } else if (addr == 0xFF45) {
+            return LYC;
+        } else if (addr == 0xFF46) {
+            return dma_src_addr;
+        } else if (addr == 0xFF47) {
+            return bgp;
+        } else if (addr == 0xFF48) {
+            return obp0;
+        } else if (addr == 0xFF49) {
+            return obp1;
+        } else if (addr == 0xFF4A) {
+            return wy;
+        } else if (addr == 0xFF4B) {
+            return wx;
         } else {
-            unknown();
+            return 0xFF;
         }
     }
     else if (addr <= 0xFFFE) return hram[addr - 0xFF80];
-    else return interrupt_enabled;
+    else return interrupt_enable;
 
     return 0xFF;
 }
 
-uint8_t GbE::CPU::read_memory(const uint16_t addr)
+void GbE::CPU::change_memory(const uint16_t addr, const uint8_t val)
 {
-    used_cycles++;
-
-    return peek_memory(addr);
-}
-
-void GbE::CPU::write_memory(const uint16_t addr, const uint8_t val)
-{
-    used_cycles++;
-
     if (testing_memory != nullptr) [[unlikely]] {
         testing_memory[addr] = val;
         return;
@@ -585,9 +700,13 @@ void GbE::CPU::write_memory(const uint16_t addr, const uint8_t val)
                 spi_buffer.push_back(spi_byte);
             }
         } else if (addr == 0xFF04) {
-            // timer and divider
-            div_counter = 0;
             div = 0;
+        } else if (addr == 0xFF05) {
+            tima = val;
+        } else if (addr == 0xFF06) {
+            tma = val;  
+        } else if (addr == 0xFF07) {
+            tac = val;
         } else if (addr == 0xFF05) {
             tima = val;
             timer_counter = 0;
@@ -600,51 +719,36 @@ void GbE::CPU::write_memory(const uint16_t addr, const uint8_t val)
                 uint16_t freq[] = {1024, 16, 64, 256};
                 timer_freq = freq[val ^ 0x04];
             }
+        } else if (addr == 0xFF0F) {
+            interrupt_flag = val & 0x1F;
         } else if (addr <= 0xFF26) {
             // audio
         } else if (addr <= 0xFF3F) {
             // wave pattern
-        } else if (addr <= 0xFF4B) {
-            // lcd
-            switch (addr) {
-            case 0xFF40: // lcdc
-                lcdc = {
-                    (bool) (val & 0x80),
-                    (bool) (val & 0x40),
-                    (bool) (val & 0x20),
-                    (bool) (val & 0x10),
-                    (bool) (val & 0x08),
-                    (bool) (val & 0x04),
-                    (bool) (val & 0x02),
-                    (bool) (val & 0x01)
-                };
-                break;
-            case 0xFF41: // stat
-                break;
-            case 0xFF42: // scx
-                scx = val;
-                break;
-            case 0xFF43:
-                scy = val; // scy
-                break;
-            case 0xFF44:
-                break;
-            case 0xFF45:
-                break;
-            case 0xFF46:
-                start_dma(val);
-                break;
-            case 0xFF47:
-                break;
-            case 0xFF48:
-                break;
-            case 0xFF49:
-                break;
-            case 0xFF4A:
-                break;
-            case 0xFF4B:
-                break;
-            }
+        } else if (addr == 0xFF40) {// lcdc
+            lcdc = val;
+        } else if (addr == 0xFF41) {
+            STAT = val;
+        } else if (addr == 0xFF42) {
+            scy = val;
+        } else if (addr == 0xFF43) {
+            scx = val;
+        } else if (addr == 0xFF44) {
+            // read only
+        } else if (addr == 0xFF45) {
+            LYC = val;
+        } else if (addr == 0xFF46) {
+            dma_src_addr = val;
+        } else if (addr == 0xFF47) {
+            bgp = val;
+        } else if (addr == 0xFF48) {
+            obp0 = val;
+        } else if (addr == 0xFF49) {
+            obp1 = val;
+        } else if (addr == 0xFF4A) {
+            wy = val;
+        } else if (addr == 0xFF4B) {
+            wx = val;
         } else if (addr <= 0xFF4F) {
             // [cgb] vram bank select
         } else if (addr <= 0xFF50) {
@@ -662,7 +766,21 @@ void GbE::CPU::write_memory(const uint16_t addr, const uint8_t val)
         }
     }
     else if (addr <= 0xFFFE) hram[addr - 0xFF80] = val;
-    else                     interrupt_enabled = val;
+    else interrupt_enable = val;
+}
+
+uint8_t GbE::CPU::read_memory(const uint16_t addr)
+{
+    m_cycle();
+
+    return peek_memory(addr);
+}
+
+void GbE::CPU::write_memory(const uint16_t addr, const uint8_t val)
+{
+    m_cycle();
+
+    change_memory(addr, val);    
 }
 
 const std::vector<uint8_t> GbE::CPU::get_spi_buffer_data() const
@@ -1222,13 +1340,13 @@ void GbE::CPU::ccf()
 void GbE::CPU::di()
 {
     debug_push_inst("di");
-    interrupt_enabled = 0x00;
+    interrupt_master_enable = 0x00;
 }
 
 void GbE::CPU::ei()
 {
     debug_push_inst("ei");
-    enable_interrupts = true;
+    ime_set = true;
 }
 
 void GbE::CPU::cb()
@@ -2232,7 +2350,7 @@ void GbE::CPU::ret()
 void GbE::CPU::reti()
 {
     debug_push_inst("reti");
-    enable_interrupts = true;
+    interrupt_master_enable = 0x01;
     PC = pop16();
 }
 
